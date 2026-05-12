@@ -18,7 +18,7 @@ A terminal-based canvas editor compatible with the Obsidian `.canvas` JSON speci
 
 ## Installation
 ### Pre-built Packages
-Pre-compiled binaries and system packages (`.deb`, `.rpm`, `PKGBUILD`) for Debian/Ubuntu, Fedora/RHEL, and Arch Linux distributions are available on the GitHub **[Releases](https://github.com/reekta92/clin/releases)** page.
+Pre-compiled binaries and system packages (`.deb`, `.rpm`, `PKGBUILD`) for Debian/Ubuntu, Fedora/RHEL, and Arch Linux distributions are available on the GitHub **[Releases](https://github.com/reekta92/pinstar/releases)** page.
 
 ### Via Cargo
 You can install the crate directly from crates.io:
