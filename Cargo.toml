@@ -21,3 +21,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.8", features = ["v4"] }
 anyhow = "1.0"
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/pinstar", dest = "/usr/bin/pinstar", mode = "0755" },
+]
