@@ -1,20 +1,4 @@
-# Generated output
 target/
-
-# IDE / editors
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Rust tooling
 **/*.rs.bk
-
-# Environment / secrets
 .env
 .env.local
