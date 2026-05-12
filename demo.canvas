@@ -1,0 +1,209 @@
+{
+  "nodes": [
+    {
+      "type": "group",
+      "id": "group_basics",
+      "x": -1072.214203,
+      "y": -482.28439,
+      "width": 380.0,
+      "height": 280.0,
+      "label": "Editor Basics",
+      "color": "6"
+    },
+    {
+      "type": "group",
+      "id": "group_navigation",
+      "x": -1506.4095350000002,
+      "y": -60.2565799999999,
+      "width": 895.3631999999998,
+      "height": 328.3153,
+      "label": "Navigation Options",
+      "color": "3"
+    },
+    {
+      "type": "group",
+      "id": "group_ecosystem",
+      "x": 471.04835300000025,
+      "y": -427.4823010000002,
+      "width": 1323.799999999999,
+      "height": 304.20000000000005,
+      "label": "The Ecosystem",
+      "color": "4"
+    },
+    {
+      "type": "group",
+      "id": "group_resources",
+      "x": -395.640788,
+      "y": -454.1023010000002,
+      "width": 643.6363636363637,
+      "height": 298.18181818181813,
+      "label": "External Resources",
+      "color": "2"
+    },
+    {
+      "type": "text",
+      "id": "intro_node",
+      "x": -309.24530000000016,
+      "y": -80.51490000000001,
+      "width": 647.7000000000007,
+      "height": 156.29999999999998,
+      "text": "# Pinstar Demo\nWelcome to the terminal-based .canvas editor.\n\nUse Arrows/Mouse to navigate!",
+      "color": "5"
+    },
+    {
+      "type": "text",
+      "id": "node_basics_1",
+      "x": -1042.214203,
+      "y": -421.2587319999999,
+      "width": 150.0,
+      "height": 80.0,
+      "text": "Supports interactive in-node text entry.\n",
+      "color": "red"
+    },
+    {
+      "type": "text",
+      "id": "node_basics_2",
+      "x": -887.2404990180319,
+      "y": -308.77188000901583,
+      "width": 150.0,
+      "height": 80.0,
+      "text": "Resizable & movable visual nodes.",
+      "color": "purple"
+    },
+    {
+      "type": "text",
+      "id": "node_nav_1",
+      "x": -1432.4095350000002,
+      "y": 0.7434200000001283,
+      "width": 414.0,
+      "height": 69.0,
+      "text": "Ctrl+j/k or +/- to Zoom fluidly.",
+      "color": "yellow"
+    },
+    {
+      "type": "text",
+      "id": "node_nav_2",
+      "x": -1030.619735000001,
+      "y": 93.63832000000014,
+      "width": 337.0,
+      "height": 80.0,
+      "text": "Middle-click drag to pan the canvas view.",
+      "color": "cyan"
+    },
+    {
+      "type": "text",
+      "id": "node_eco_1",
+      "x": 580.9083530000003,
+      "y": -364.17230100000023,
+      "width": 320.0,
+      "height": 100.0,
+      "text": "Part of the clin-rs workspace!\nOptimized for fast local edits without heavy desktop bloat.",
+      "color": "green"
+    },
+    {
+      "type": "file",
+      "id": "node_eco_2",
+      "x": 1166.5483530000008,
+      "y": -337.34230100000013,
+      "width": 320.0,
+      "height": 80.0,
+      "file": "README.md",
+      "subpath": null,
+      "color": "cyan"
+    },
+    {
+      "type": "link",
+      "id": "node_res_1",
+      "x": -356.5498789090909,
+      "y": -422.2841191818184,
+      "width": 320.0,
+      "height": 100.0,
+      "url": "https://obsidian.md/canvas",
+      "color": "orange"
+    },
+    {
+      "type": "link",
+      "id": "node_res_2",
+      "x": -138.4316970909091,
+      "y": -296.20230100000015,
+      "width": 320.0,
+      "height": 80.0,
+      "url": "https://github.com/reekta92/clin",
+      "color": "purple"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_intro_basics",
+      "fromNode": "intro_node",
+      "fromSide": "left",
+      "toNode": "group_basics",
+      "toSide": "right",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_intro_nav",
+      "fromNode": "intro_node",
+      "fromSide": "right",
+      "toNode": "group_navigation",
+      "toSide": "left",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_intro_eco",
+      "fromNode": "intro_node",
+      "fromSide": "bottom",
+      "toNode": "group_ecosystem",
+      "toSide": "top",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_intro_res",
+      "fromNode": "intro_node",
+      "fromSide": "bottom",
+      "toNode": "group_resources",
+      "toSide": "top",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_basics_sub",
+      "fromNode": "node_basics_1",
+      "fromSide": "bottom",
+      "toNode": "node_basics_2",
+      "toSide": "left",
+      "label": "inherits",
+      "color": null
+    },
+    {
+      "id": "edge_nav_sub",
+      "fromNode": "node_nav_1",
+      "fromSide": "bottom",
+      "toNode": "node_nav_2",
+      "toSide": "left",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_eco_sub",
+      "fromNode": "node_eco_1",
+      "fromSide": "bottom",
+      "toNode": "node_eco_2",
+      "toSide": "top",
+      "label": null,
+      "color": null
+    },
+    {
+      "id": "edge_res_sub",
+      "fromNode": "node_res_1",
+      "fromSide": "bottom",
+      "toNode": "node_res_2",
+      "toSide": "top",
+      "label": null,
+      "color": null
+    }
+  ]
+}

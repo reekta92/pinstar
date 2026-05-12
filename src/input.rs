@@ -195,7 +195,11 @@ pub fn handle_pinstar_mouse(
             let hit_node = state.select_node_at(cx, cy);
 
             if is_double_click && hit_node.is_some() {
-                state.toggle_editor();
+                if state.ext_editor_enabled {
+                    state.trigger_ext_editor = true;
+                } else {
+                    state.toggle_editor();
+                }
                 state.last_click = None;
             } else if hit_node.is_some() {
                 state.drag_start_pos = Some((cx, cy));
@@ -601,10 +605,6 @@ pub fn handle_pinstar_event(
             } else {
                 state.ext_focused = true;
             }
-        }
-        KeyCode::Char('?') => {
-            state.help_requested = true;
-            *running = false;
         }
         _ => return false,
     }

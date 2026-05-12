@@ -32,7 +32,6 @@ pub struct PinstarState {
     pub show_grid: bool,
     pub mouse_selecting: bool,
     pub mouse_dragged: bool,
-    pub help_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -86,7 +85,6 @@ impl PinstarState {
             show_grid: true,
             mouse_selecting: false,
             mouse_dragged: false,
-            help_requested: false,
         })
     }
 

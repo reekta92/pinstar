@@ -561,13 +561,13 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
     }
 
     let mut hint_text =
-        "Tab switch focus · Esc back · Arrows select · i/Enter edit · Ctrl+S save".to_string();
+        "Tab focus · Esc/q back · Arrows/hjkl select · i/Enter edit · a menu · Ctrl+S save · Ctrl+G grid · Ctrl+E src · Ctrl+j/k/+/- zoom".to_string();
     if state.connection_source_id.is_some() {
         hint_text = "CONNECTION MODE: Select target node with mouse or Enter".to_string();
     } else if state.deleting_connection_source_id.is_some() {
         hint_text = "DELETE CONNECTION MODE: Select target node to remove link".to_string();
     } else if state.resizing_node_id.is_some() {
-        hint_text = "RESIZE MODE: Drag mouse to resize, Left-click to confirm".to_string();
+        hint_text = "RESIZE MODE: Drag mouse to resize, Right-click to confirm".to_string();
     }
 
     let mut spans = Vec::new();
