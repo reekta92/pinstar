@@ -2,8 +2,6 @@
 
 <img width="1888" height="1012" alt="image" src="https://github.com/user-attachments/assets/85c0c26c-f7f6-4e5a-9538-dc8f603e0659" />
 
-https://github.com/user-attachments/assets/6010b25e-ab7d-4144-8bb3-17e55b99bd11
-
 A terminal-based diagram editor for **Obsidian Canvas**, **Mermaid**, **Graphviz DOT**, and **PlantUML** files. Built with Rust and the Ratatui framework.
 
 ## Disclaimer
