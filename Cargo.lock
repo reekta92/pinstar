@@ -869,6 +869,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "ratatui-textarea",
+ "regex",
  "serde",
  "serde_json",
  "uuid",

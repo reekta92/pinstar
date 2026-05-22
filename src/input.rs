@@ -1,7 +1,8 @@
 use crate::helpers::{contains_cell, move_textarea_cursor_to_mouse};
 use crate::state::{PinstarMenuType, PinstarState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui_textarea::{Input, TextArea};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui_textarea::{Input, TextArea, WrapMode};
 
 pub fn handle_pinstar_mouse(
     state: &mut PinstarState,
@@ -44,8 +45,17 @@ pub fn handle_pinstar_mouse(
             }
 
             let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
-            state.select_node_at(cx, cy);
-            state.open_context_menu(mouse.column, mouse.row, cx, cy);
+            let hit_node = state.select_node_at(mouse.column, mouse.row, canvas_area);
+            if hit_node.is_some() {
+                state.open_context_menu(mouse.column, mouse.row, cx, cy);
+            } else if state.format.is_flowchart() && state.format != crate::formats::SupportedFormat::Mermaid && state.select_edge_at(cx, cy).is_some() {
+                state.open_edge_context_menu(mouse.column, mouse.row);
+            } else {
+                // Right-click on empty space: start selection rectangle
+                state.select_rect_start = Some((cx, cy));
+                state.select_rect_end = Some((cx, cy));
+                state.last_mouse_pos = Some((mouse.column, mouse.row));
+            }
             true
         }
         MouseEventKind::Down(MouseButton::Middle) => {
@@ -68,18 +78,12 @@ pub fn handle_pinstar_mouse(
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if mouse.row == area.bottom().saturating_sub(1) && mouse.column < 10 {
-                state.ext_editor_enabled = !state.ext_editor_enabled;
-                state.ext_focused = true;
-                return true;
-            }
-            state.ext_focused = false;
             let mut menu_action = None;
             let mut close_menu = false;
 
             if let Some(menu) = &state.context_menu {
                 close_menu = true;
-                let menu_width = 25;
+                let menu_width = 32;
                 let menu_height = menu.items.len() as u16;
 
                 if mouse.column >= menu.x
@@ -88,8 +92,8 @@ pub fn handle_pinstar_mouse(
                     && mouse.row < menu.y + menu_height
                 {
                     let selected = (mouse.row - menu.y) as usize;
-                    if selected < menu.items.len() {
-                        menu_action = Some((selected, menu.menu_type, menu.x, menu.y));
+                    if let Some(label) = menu.items.get(selected) {
+                        menu_action = Some((label.clone(), menu.menu_type, menu.x, menu.y));
                     }
                 }
             }
@@ -98,8 +102,8 @@ pub fn handle_pinstar_mouse(
                 state.context_menu = None;
             }
 
-            if let Some((selected, menu_type, mx, my)) = menu_action {
-                execute_menu_action(state, selected, menu_type, mx, my);
+            if let Some((label, menu_type, mx, my)) = menu_action {
+                execute_menu_action(state, &label, menu_type, mx, my);
                 return true;
             }
 
@@ -132,7 +136,7 @@ pub fn handle_pinstar_mouse(
             let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
 
             if state.connection_source_id.is_some() {
-                if let Some(target_id) = state.select_node_at(cx, cy) {
+                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area) {
                     state.finish_connection(&target_id);
                 } else {
                     state.connection_source_id = None;
@@ -141,7 +145,7 @@ pub fn handle_pinstar_mouse(
             }
 
             if state.deleting_connection_source_id.is_some() {
-                if let Some(target_id) = state.select_node_at(cx, cy) {
+                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area) {
                     state.finish_delete_connection(&target_id);
                 } else {
                     state.deleting_connection_source_id = None;
@@ -171,11 +175,43 @@ pub fn handle_pinstar_mouse(
 
             if state.floating_editor.is_some() {
                 let prev_selected = state.selected_node_id.clone();
-                let hit_node = state.select_node_at(cx, cy);
+                let mut is_inside_editor = false;
 
-                if hit_node != prev_selected {
+                if let Some(id) = &prev_selected {
+                    if let Some(node) = state.data.nodes.iter().find(|n| n.id() == id) {
+                        let (nx, ny) = node.pos();
+                        let (nw, nh) = node.size();
+                        let sx = ((nx - state.viewport_x) * state.zoom)
+                            + (canvas_area.x as f64 + canvas_area.width as f64 / 2.0);
+                        let sy = ((ny - state.viewport_y) * state.zoom)
+                            + (canvas_area.y as f64 + canvas_area.height as f64 / 2.0);
+                        let sw = nw * state.zoom;
+                        let sh = nh * state.zoom;
+
+                        let left = sx.round() as i32;
+                        let top = sy.round() as i32;
+                        let right = (sx + sw).round() as i32;
+                        let bottom = (sy + sh).round() as i32;
+
+                        let expansion_x = 2;
+                        let expansion_y = 1;
+                        let el = left - expansion_x;
+                        let er = right + expansion_x;
+                        let et = top - expansion_y;
+                        let eb = bottom + expansion_y;
+
+                        let mc = mouse.column as i32;
+                        let mr = mouse.row as i32;
+                        if mc >= el && mc < er && mr >= et && mr < eb {
+                            is_inside_editor = true;
+                        }
+                    }
+                }
+
+                if !is_inside_editor {
                     state.selected_node_id = prev_selected;
                     state.toggle_editor();
+                    let hit_node = state.select_node_at(mouse.column, mouse.row, canvas_area);
                     state.selected_node_id = hit_node.clone();
 
                     if hit_node.is_none() {
@@ -192,20 +228,34 @@ pub fn handle_pinstar_mouse(
                 false
             };
 
-            let hit_node = state.select_node_at(cx, cy);
+            let hit_node = state.node_at(mouse.column, mouse.row, canvas_area);
+            let is_already_selected = hit_node.as_ref().map_or(false, |id| {
+                state.selected_node_id.as_ref() == Some(id) || state.drag_captured_nodes.contains(id)
+            });
 
             if is_double_click && hit_node.is_some() {
+                if !is_already_selected {
+                    state.drag_captured_nodes.clear();
+                    let _ = state.select_node_at(mouse.column, mouse.row, canvas_area);
+                }
                 if state.ext_editor_enabled {
                     state.trigger_ext_editor = true;
                 } else {
                     state.toggle_editor();
                 }
                 state.last_click = None;
-            } else if hit_node.is_some() {
+            } else if let Some(_) = hit_node {
+                if !is_already_selected {
+                    state.drag_captured_nodes.clear();
+                    let _ = state.select_node_at(mouse.column, mouse.row, canvas_area);
+                }
+                state.capture_group_children();
+                state.record_undo_state();
                 state.drag_start_pos = Some((cx, cy));
-                state.capture_drag_nodes();
                 state.last_click = Some((mouse.column, mouse.row, std::time::Instant::now()));
             } else {
+                state.drag_captured_nodes.clear();
+                let _ = state.select_node_at(mouse.column, mouse.row, canvas_area);
                 state.last_click = Some((mouse.column, mouse.row, std::time::Instant::now()));
             }
 
@@ -221,9 +271,38 @@ pub fn handle_pinstar_mouse(
 
             if state.drag_start_pos.is_some() {
                 state.drag_start_pos = None;
-                state.drag_captured_nodes.clear();
+                state.drag_group_children.clear();
                 let _ = state.save();
             }
+            state.last_mouse_pos = None;
+            true
+        }
+        MouseEventKind::Up(MouseButton::Right) => {
+            if let (Some(start), Some(end)) = (state.select_rect_start, state.select_rect_end) {
+                if (start.0 - end.0).abs() > 5.0 || (start.1 - end.1).abs() > 5.0 {
+                    // Significant drag: select nodes in rectangle
+                    state.select_nodes_in_rect(start.0, start.1, end.0, end.1);
+                    if state.format.is_flowchart() && state.format != crate::formats::SupportedFormat::Mermaid && state.selected_edge_id.is_some() {
+                        state.open_edge_context_menu(mouse.column, mouse.row);
+                    }
+                } else {
+                    // Just a click: show add-node menu
+                    state.context_menu_pos = (start.0, start.1);
+                    let mut items = vec!["Add Text Node".to_string()];
+                    if state.format == crate::formats::SupportedFormat::Canvas {
+                        items.push("Add Group".to_string());
+                    }
+                    state.context_menu = Some(crate::state::PinstarContextMenu {
+                        x: mouse.column,
+                        y: mouse.row,
+                        selected: 0,
+                        items,
+                        menu_type: crate::state::PinstarMenuType::Canvas,
+                    });
+                }
+            }
+            state.select_rect_start = None;
+            state.select_rect_end = None;
             state.last_mouse_pos = None;
             true
         }
@@ -250,6 +329,7 @@ pub fn handle_pinstar_mouse(
             }
 
             if state.resizing_node_id.is_some()
+                && !state.locked
                 && let Some((lx, ly)) = state.last_mouse_pos
             {
                 let dw = mouse.column as f64 - lx as f64;
@@ -259,7 +339,7 @@ pub fn handle_pinstar_mouse(
                 return true;
             }
 
-            if let Some(last_pos) = state.drag_start_pos {
+            if let Some(last_pos) = state.drag_start_pos && !state.locked {
                 let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
                 let dx = cx - last_pos.0;
                 let dy = cy - last_pos.1;
@@ -270,6 +350,16 @@ pub fn handle_pinstar_mouse(
                 let dx = mouse.column as f64 - lx as f64;
                 let dy = mouse.row as f64 - ly as f64;
                 state.pan(-dx, -dy);
+                state.last_mouse_pos = Some((mouse.column, mouse.row));
+                true
+            } else {
+                false
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Right) => {
+            if state.select_rect_start.is_some() {
+                let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
+                state.select_rect_end = Some((cx, cy));
                 state.last_mouse_pos = Some((mouse.column, mouse.row));
                 true
             } else {
@@ -298,25 +388,25 @@ pub fn handle_pinstar_mouse(
 
 fn execute_menu_action(
     state: &mut PinstarState,
-    selected_index: usize,
+    label: &str,
     menu_type: PinstarMenuType,
     menu_x: u16,
     menu_y: u16,
 ) {
     if menu_type == PinstarMenuType::Editor {
-        match selected_index {
-            0 => {
+        match label {
+            "Copy" => {
                 state.raw_editor.copy();
             }
-            1 => {
+            "Cut" => {
                 state.raw_editor.cut();
                 let _ = state.sync_from_raw_editor();
             }
-            2 => {
+            "Paste" => {
                 state.raw_editor.paste();
                 let _ = state.sync_from_raw_editor();
             }
-            3 => {
+            "Select All" => {
                 state.raw_editor.select_all();
             }
             _ => {}
@@ -325,26 +415,132 @@ fn execute_menu_action(
     }
 
     if menu_type == PinstarMenuType::ColorPicker {
-        match selected_index {
-            0 => state.set_node_color(None),
-            1 => state.set_node_color(Some("#ff5252".to_string())),
-            2 => state.set_node_color(Some("#4caf50".to_string())),
-            3 => state.set_node_color(Some("#ffeb3b".to_string())),
-            4 => state.set_node_color(Some("#00bcd4".to_string())),
+        match label {
+            "Default" => state.set_node_color(None),
+            "Red" => state.set_node_color(Some("#ff5252".to_string())),
+            "Orange" => state.set_node_color(Some("#ff9800".to_string())),
+            "Yellow" => state.set_node_color(Some("#ffeb3b".to_string())),
+            "Green" => state.set_node_color(Some("#4caf50".to_string())),
+            "Cyan" => state.set_node_color(Some("#00bcd4".to_string())),
+            "Blue" => state.set_node_color(Some("#2196f3".to_string())),
+            "Purple" => state.set_node_color(Some("#9c27b0".to_string())),
+            "Magenta" => state.set_node_color(Some("#e91e63".to_string())),
+            "White" => state.set_node_color(Some("#ffffff".to_string())),
             _ => {}
         }
+        state.selected_node_id = None;
+        state.selected_edge_id = None;
+        return;
+    }
+
+    if menu_type == PinstarMenuType::ShapePicker {
+        let shape = match label {
+            "Rectangle" => crate::data::NodeShape::Rectangle,
+            "Diamond" => crate::data::NodeShape::Diamond,
+            "Circle" => crate::data::NodeShape::Circle,
+            "Cylinder" => crate::data::NodeShape::Cylinder,
+            "Stadium" => crate::data::NodeShape::Stadium,
+            _ => crate::data::NodeShape::Rectangle,
+        };
+        state.set_node_shape(shape);
+        state.selected_node_id = None;
+        state.selected_edge_id = None;
+        return;
+    }
+
+    if menu_type == PinstarMenuType::EdgeMenu {
+        let items = match label {
+            "Set Color..." => vec![
+                "Default".to_string(),
+                "Red".to_string(),
+                "Orange".to_string(),
+                "Yellow".to_string(),
+                "Green".to_string(),
+                "Cyan".to_string(),
+                "Blue".to_string(),
+                "Purple".to_string(),
+                "Magenta".to_string(),
+                "White".to_string(),
+            ],
+            "Set Style..." => vec![
+                "Solid".to_string(),
+                "Dashed".to_string(),
+                "Dotted".to_string(),
+            ],
+            _ => return,
+        };
+        let next_type = match label {
+            "Set Color..." => PinstarMenuType::EdgeColorPicker,
+            "Set Style..." => PinstarMenuType::EdgeStylePicker,
+            _ => return,
+        };
+        state.context_menu = Some(crate::state::PinstarContextMenu {
+            x: menu_x,
+            y: menu_y,
+            selected: 0,
+            items,
+            menu_type: next_type,
+        });
+        return;
+    }
+
+    if menu_type == PinstarMenuType::EdgeColorPicker {
+        let color = match label {
+            "Default" => None,
+            "Red" => Some("#ff5252".to_string()),
+            "Orange" => Some("#ff9800".to_string()),
+            "Yellow" => Some("#ffeb3b".to_string()),
+            "Green" => Some("#4caf50".to_string()),
+            "Cyan" => Some("#00bcd4".to_string()),
+            "Blue" => Some("#2196f3".to_string()),
+            "Purple" => Some("#9c27b0".to_string()),
+            "Magenta" => Some("#e91e63".to_string()),
+            "White" => Some("#ffffff".to_string()),
+            _ => None,
+        };
+        state.set_edge_color(color);
+        state.selected_edge_id = None;
+        state.selected_node_id = None;
+        return;
+    }
+
+    if menu_type == PinstarMenuType::EdgeStylePicker {
+        let style = match label {
+            "Solid" => crate::data::EdgeStyle::Solid,
+            "Dashed" => crate::data::EdgeStyle::Dashed,
+            "Dotted" => crate::data::EdgeStyle::Dotted,
+            _ => crate::data::EdgeStyle::Solid,
+        };
+        state.set_edge_style(style);
+        state.selected_edge_id = None;
+        state.selected_node_id = None;
+        return;
+    }
+
+    if menu_type == PinstarMenuType::OrientationPicker {
+        let orientation = match label {
+            "Top-Down" => crate::data::DiagramOrientation::TopDown,
+            "Left-Right" => crate::data::DiagramOrientation::LeftRight,
+            "Right-Left" => crate::data::DiagramOrientation::RightLeft,
+            "Bottom-Up" => crate::data::DiagramOrientation::DownTop,
+            _ => crate::data::DiagramOrientation::TopDown,
+        };
+        state.set_orientation(orientation);
+        state.selected_node_id = None;
+        state.selected_edge_id = None;
         return;
     }
 
     let node_id = state.selected_node_id.clone();
 
-    if let Some(id) = node_id {
-        match selected_index {
-            0 => state.start_connection(),
-            1 => state.start_delete_connection(),
-            2 => {
+    match label {
+        "Create Connection" => state.start_connection(),
+        "Delete Connection" => state.start_delete_connection(),
+        "Rename Node" => {
+            if let Some(id) = node_id {
                 let mut textarea = TextArea::from(vec![id.clone()]);
                 textarea.set_cursor_line_style(ratatui::style::Style::default());
+                textarea.set_wrap_mode(WrapMode::WordOrGlyph);
                 textarea.set_block(
                     ratatui::widgets::Block::default()
                         .borders(ratatui::widgets::Borders::ALL)
@@ -352,43 +548,78 @@ fn execute_menu_action(
                 );
                 state.rename_popup = Some(textarea);
             }
-            3 => state.start_resize(),
-            4 => {
-                let items = vec![
-                    "Default".to_string(),
-                    "Red".to_string(),
-                    "Green".to_string(),
-                    "Yellow".to_string(),
-                    "Blue".to_string(),
-                ];
-                state.context_menu = Some(crate::state::PinstarContextMenu {
-                    x: menu_x,
-                    y: menu_y,
-                    selected: 0,
-                    items,
-                    menu_type: PinstarMenuType::ColorPicker,
-                });
+        }
+        "Resize Node" => state.start_resize(),
+        "Set Shape..." => {
+            let mut items = vec![
+                "Rectangle".to_string(),
+                "Diamond".to_string(),
+                "Circle".to_string(),
+                "Cylinder".to_string(),
+                "Stadium".to_string(),
+            ];
+            if state.format == crate::formats::SupportedFormat::PlantUml {
+                items.retain(|item| item != "Diamond" && item != "Stadium");
             }
-            5 => state.delete_node_connections(),
-            6 => {
-                let id_clone = id.clone();
-                state.data.nodes.retain(|n| n.id() != id_clone);
-                state
-                    .data
-                    .edges
-                    .retain(|e| e.from_node != id_clone && e.to_node != id_clone);
+            state.context_menu = Some(crate::state::PinstarContextMenu {
+                x: menu_x,
+                y: menu_y,
+                selected: 0,
+                items,
+                menu_type: PinstarMenuType::ShapePicker,
+            });
+        }
+        "Set Color..." => {
+            let items = vec![
+                "Default".to_string(),
+                "Red".to_string(),
+                "Orange".to_string(),
+                "Yellow".to_string(),
+                "Green".to_string(),
+                "Cyan".to_string(),
+                "Blue".to_string(),
+                "Purple".to_string(),
+                "Magenta".to_string(),
+                "White".to_string(),
+            ];
+            state.context_menu = Some(crate::state::PinstarContextMenu {
+                x: menu_x,
+                y: menu_y,
+                selected: 0,
+                items,
+                menu_type: PinstarMenuType::ColorPicker,
+            });
+        }
+        "Set Orientation..." => {
+            let items = vec![
+                "Top-Down".to_string(),
+                "Left-Right".to_string(),
+                "Right-Left".to_string(),
+                "Bottom-Up".to_string(),
+            ];
+            state.context_menu = Some(crate::state::PinstarContextMenu {
+                x: menu_x,
+                y: menu_y,
+                selected: 0,
+                items,
+                menu_type: PinstarMenuType::OrientationPicker,
+            });
+        }
+        "Delete All Connections" => state.delete_node_connections(),
+        "Delete Node" => {
+            let ids = state.all_selected_node_ids();
+            if !ids.is_empty() {
+                state.record_undo_state();
+                state.data.nodes.retain(|n| !ids.contains(n.id()));
+                state.data.edges.retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
                 state.selected_node_id = None;
+                state.drag_captured_nodes.clear();
                 let _ = state.save();
-                state.sync_to_raw_editor();
             }
-            _ => {}
         }
-    } else {
-        match selected_index {
-            0 => state.add_text_node(state.context_menu_pos.0, state.context_menu_pos.1),
-            1 => state.add_group(state.context_menu_pos.0, state.context_menu_pos.1),
-            _ => {}
-        }
+        "Add Text Node" => state.add_text_node(state.context_menu_pos.0, state.context_menu_pos.1),
+        "Add Group" => state.add_group(state.context_menu_pos.0, state.context_menu_pos.1),
+        _ => {}
     }
 }
 
@@ -398,6 +629,37 @@ pub fn handle_pinstar_event(
     running: &mut bool,
     area: ratatui::layout::Rect,
 ) -> bool {
+    if state.show_help {
+        match key.code {
+            KeyCode::Tab => {
+                state.help_tab = state.help_tab.next();
+                state.help_scroll = 0;
+            }
+            KeyCode::BackTab => {
+                state.help_tab = state.help_tab.prev();
+                state.help_scroll = 0;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                state.help_scroll = state.help_scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.help_scroll = state.help_scroll.saturating_sub(1);
+            }
+            KeyCode::Char('G') | KeyCode::PageDown => {
+                state.help_scroll = state.help_scroll.saturating_add(10);
+            }
+            KeyCode::Char('g') | KeyCode::PageUp => {
+                state.help_scroll = state.help_scroll.saturating_sub(10);
+            }
+            _ => {
+                // Esc, q, ?, or any other key closes help
+                state.show_help = false;
+                state.help_scroll = 0;
+            }
+        }
+        return true;
+    }
+
     if let Some(textarea) = &mut state.rename_popup {
         match key.code {
             KeyCode::Esc => {
@@ -432,8 +694,25 @@ pub fn handle_pinstar_event(
                 }
             }
             KeyCode::Enter => {
-                menu_action = Some((menu.selected, menu.menu_type, menu.x, menu.y));
+                if let Some(label) = menu.items.get(menu.selected) {
+                    menu_action = Some((label.clone(), menu.menu_type, menu.x, menu.y));
+                }
                 close_menu = true;
+            }
+            KeyCode::Char(c) => {
+                let mut found_label = None;
+                for label in &menu.items {
+                    if let Some(sc) = crate::helpers::get_menu_shortcut_char(menu.menu_type, label) {
+                        if sc == c.to_ascii_lowercase() {
+                            found_label = Some(label.clone());
+                            break;
+                        }
+                    }
+                }
+                if let Some(label) = found_label {
+                    menu_action = Some((label, menu.menu_type, menu.x, menu.y));
+                    close_menu = true;
+                }
             }
             _ => {}
         }
@@ -443,8 +722,8 @@ pub fn handle_pinstar_event(
         state.context_menu = None;
     }
 
-    if let Some((selected, menu_type, mx, my)) = menu_action {
-        execute_menu_action(state, selected, menu_type, mx, my);
+    if let Some((label, menu_type, mx, my)) = menu_action {
+        execute_menu_action(state, &label, menu_type, mx, my);
         return true;
     } else if close_menu {
         return true;
@@ -458,11 +737,9 @@ pub fn handle_pinstar_event(
         match key.code {
             KeyCode::Esc => {
                 state.toggle_editor();
-                state.sync_to_raw_editor();
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 state.toggle_editor();
-                state.sync_to_raw_editor();
             }
             _ => {
                 editor.input(Input::from(key));
@@ -492,27 +769,15 @@ pub fn handle_pinstar_event(
         }
     }
 
-    if state.ext_focused {
-        match key.code {
-            KeyCode::Esc | KeyCode::Tab | KeyCode::Char('q') => {
-                state.ext_focused = false;
-            }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                state.ext_editor_enabled = !state.ext_editor_enabled;
-            }
-            _ => {}
-        }
-        return true;
-    }
+
 
     if state.editor_focus {
         match key.code {
             KeyCode::Esc => {
                 state.editor_focus = false;
             }
-            KeyCode::Tab => {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
                 state.editor_focus = false;
-                state.ext_focused = true;
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let _ = state.sync_from_raw_editor();
@@ -532,8 +797,61 @@ pub fn handle_pinstar_event(
                 *running = false;
             }
         }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+            if state.show_editor_pane {
+                state.editor_focus = true;
+            }
+        }
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.locked = !state.locked;
+        }
+        KeyCode::Char('?') | KeyCode::Char('/') => {
+            state.show_help = true;
+        }
+        KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if state.format == crate::formats::SupportedFormat::Canvas {
+                state.orthogonal_connections = !state.orthogonal_connections;
+            }
+        }
+        KeyCode::Char('z') | KeyCode::Char('Z') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+            let _ = state.redo();
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let _ = state.redo();
+        }
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let _ = state.undo();
+        }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             let _ = state.save();
+        }
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if state.format.is_flowchart() {
+                state.cycle_orientation();
+            } else {
+                let _ = state.reload();
+            }
+        }
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let canvas_area = if state.show_editor_pane {
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+                    .split(area);
+                chunks[1]
+            } else {
+                area
+            };
+            state.fit_to_view(canvas_area);
+        }
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.ext_editor_enabled = !state.ext_editor_enabled;
+
+            if state.ext_editor_enabled && state.show_editor_pane {
+                state.show_editor_pane = false;
+                state.editor_focus = false;
+                state.trigger_whole_file_editor = true;
+            }
         }
         KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.zoom_in();
@@ -562,6 +880,85 @@ pub fn handle_pinstar_event(
         }
         KeyCode::Char('-') | KeyCode::Char('_') => {
             state.zoom_out();
+        }
+        KeyCode::Char('c') if state.selected_node_id.is_some() => {
+            state.start_connection();
+        }
+        KeyCode::Char('d') if state.selected_node_id.is_some() => {
+            state.start_delete_connection();
+        }
+        KeyCode::Char('r') if state.selected_node_id.is_some() => {
+            if let Some(id) = &state.selected_node_id {
+                let mut textarea = TextArea::from(vec![id.clone()]);
+                textarea.set_cursor_line_style(ratatui::style::Style::default());
+                textarea.set_wrap_mode(WrapMode::WordOrGlyph);
+                textarea.set_block(
+                    ratatui::widgets::Block::default()
+                        .borders(ratatui::widgets::Borders::ALL)
+                        .title(" Rename Node (ID) - Enter to confirm, Esc to cancel "),
+                );
+                state.rename_popup = Some(textarea);
+            }
+        }
+        KeyCode::Char('s') if state.selected_node_id.is_some() => {
+            state.start_resize();
+        }
+        KeyCode::Char('p') if state.selected_node_id.is_some() && state.format != crate::formats::SupportedFormat::Canvas => {
+            let mut items = vec![
+                "Rectangle".to_string(),
+                "Diamond".to_string(),
+                "Circle".to_string(),
+                "Cylinder".to_string(),
+                "Stadium".to_string(),
+            ];
+            if state.format == crate::formats::SupportedFormat::PlantUml {
+                items.retain(|item| item != "Diamond" && item != "Stadium");
+            }
+            let menu_x = (area.width / 2).saturating_sub(16);
+            let menu_y = (area.height / 2).saturating_sub(3);
+            state.context_menu = Some(crate::state::PinstarContextMenu {
+                x: menu_x,
+                y: menu_y,
+                selected: 0,
+                items,
+                menu_type: PinstarMenuType::ShapePicker,
+            });
+        }
+        KeyCode::Char('o') if state.selected_node_id.is_some() && state.format != crate::formats::SupportedFormat::Mermaid && state.format != crate::formats::SupportedFormat::PlantUml => {
+            let items = vec![
+                "Default".to_string(),
+                "Red".to_string(),
+                "Orange".to_string(),
+                "Yellow".to_string(),
+                "Green".to_string(),
+                "Cyan".to_string(),
+                "Blue".to_string(),
+                "Purple".to_string(),
+                "Magenta".to_string(),
+                "White".to_string(),
+            ];
+            let menu_x = (area.width / 2).saturating_sub(16);
+            let menu_y = (area.height / 2).saturating_sub(6);
+            state.context_menu = Some(crate::state::PinstarContextMenu {
+                x: menu_x,
+                y: menu_y,
+                selected: 0,
+                items,
+                menu_type: PinstarMenuType::ColorPicker,
+            });
+        }
+        KeyCode::Char('b') if state.selected_node_id.is_some() => {
+            state.delete_node_connections();
+        }
+        KeyCode::Char('x') if state.selected_node_id.is_some() => {
+            state.record_undo_state();
+            let ids = state.all_selected_node_ids();
+            if !ids.is_empty() {
+                state.data.nodes.retain(|n| !ids.contains(n.id()));
+                state.data.edges.retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
+                state.selected_node_id = None;
+                let _ = state.save();
+            }
         }
         KeyCode::Char('i') | KeyCode::Enter => {
             let target_id_opt = state.selected_node_id.clone();
@@ -594,18 +991,16 @@ pub fn handle_pinstar_event(
             state.show_grid = !state.show_grid;
         }
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.show_editor_pane = !state.show_editor_pane;
-            if !state.show_editor_pane {
-                state.editor_focus = false;
-            }
-        }
-        KeyCode::Tab => {
-            if state.show_editor_pane {
-                state.editor_focus = true;
+            if state.ext_editor_enabled {
+                state.trigger_whole_file_editor = true;
             } else {
-                state.ext_focused = true;
+                state.show_editor_pane = !state.show_editor_pane;
+                if !state.show_editor_pane {
+                    state.editor_focus = false;
+                }
             }
         }
+
         _ => return false,
     }
 

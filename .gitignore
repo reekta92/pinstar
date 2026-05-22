@@ -2,3 +2,7 @@ target/
 **/*.rs.bk
 .env
 .env.local
+test*
+*.log
+/examples/
+/graphify*
