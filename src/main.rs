@@ -1,6 +1,7 @@
 mod app;
 mod data;
 mod formats;
+mod help;
 mod helpers;
 mod input;
 mod render;
@@ -12,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() != 2 {
-        eprintln!("Usage: pinstar <FILE_NAME>");
+        eprintln!("Usage: pinstar <FILE>.canvas|.md|.dot|.puml");
         std::process::exit(1);
     }
 
@@ -43,7 +44,13 @@ fn main() -> anyhow::Result<()> {
             }
         };
         std::fs::write(&path, initial_content)?;
-        eprintln!("Created empty diagram: {}", path.display());
+        let format_name = match format {
+            formats::SupportedFormat::Canvas => "Canvas",
+            formats::SupportedFormat::Mermaid => "Mermaid",
+            formats::SupportedFormat::Dot => "DOT",
+            formats::SupportedFormat::PlantUml => "PlantUML",
+        };
+        eprintln!("Created empty {} diagram: {}", format_name, path.display());
     }
 
     app::run_pinstar(path)

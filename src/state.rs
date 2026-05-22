@@ -4,6 +4,50 @@ use anyhow::Result;
 use ratatui_textarea::{TextArea, WrapMode};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinstarHelpTab {
+    Keyboard,
+    Mouse,
+    Menus,
+    Formats,
+}
+
+impl PinstarHelpTab {
+    pub const ALL: [PinstarHelpTab; 4] = [
+        PinstarHelpTab::Keyboard,
+        PinstarHelpTab::Mouse,
+        PinstarHelpTab::Menus,
+        PinstarHelpTab::Formats,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            PinstarHelpTab::Keyboard => "Keyboard",
+            PinstarHelpTab::Mouse => "Mouse",
+            PinstarHelpTab::Menus => "Menus",
+            PinstarHelpTab::Formats => "Formats",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            PinstarHelpTab::Keyboard => PinstarHelpTab::Mouse,
+            PinstarHelpTab::Mouse => PinstarHelpTab::Menus,
+            PinstarHelpTab::Menus => PinstarHelpTab::Formats,
+            PinstarHelpTab::Formats => PinstarHelpTab::Keyboard,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            PinstarHelpTab::Keyboard => PinstarHelpTab::Formats,
+            PinstarHelpTab::Mouse => PinstarHelpTab::Keyboard,
+            PinstarHelpTab::Menus => PinstarHelpTab::Mouse,
+            PinstarHelpTab::Formats => PinstarHelpTab::Menus,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct PinstarSnapshot {
     pub data: CanvasData,
@@ -46,6 +90,8 @@ pub struct PinstarState {
     pub last_modified: std::time::SystemTime,
     pub orthogonal_connections: bool,
     pub show_help: bool,
+    pub help_tab: PinstarHelpTab,
+    pub help_scroll: u16,
     pub select_rect_start: Option<(f64, f64)>,
     pub select_rect_end: Option<(f64, f64)>,
     pub has_layout_override: bool,
@@ -125,6 +171,8 @@ impl PinstarState {
             mouse_dragged: false,
             orthogonal_connections: false,
             show_help: false,
+            help_tab: PinstarHelpTab::Keyboard,
+            help_scroll: 0,
             select_rect_start: None,
             select_rect_end: None,
             has_layout_override,

@@ -1051,10 +1051,10 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         }
     }
 
-    let mut hint_text = if state.format.is_flowchart() {
-        "Ctrl+F fit · Ctrl+R orient · Alt+Enter focus · ? help · Esc/q back".to_string()
+    let mut hint_text = if state.editor_focus && state.show_editor_pane {
+        "Editor Pane — Ctrl+S sync · Alt+Enter back to canvas".to_string()
     } else {
-        "Ctrl+F fit · Ctrl+R reload · Alt+Enter focus · ? help · Esc/q back".to_string()
+        "? help · a menu · i edit · Ctrl+S save · Ctrl+Z undo · Alt+Enter focus · Esc/q back".to_string()
     };
     if state.connection_source_id.is_some() {
         hint_text = "CONNECTION MODE: Select target node with mouse or Enter".to_string();
@@ -1215,7 +1215,7 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                 .border_style(Style::default().fg(theme.accent))
                 .style(theme.bg_style())
                 .title(Span::styled(
-                    " Rename Node (ID) - Enter to confirm, Esc to cancel ",
+                    " Rename Node — Enter: confirm · Esc: cancel ",
                     Style::default().fg(theme.accent),
                 )),
         );
@@ -1227,54 +1227,98 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let popup_area = centered_rect(80, 85, area);
         frame.render_widget(Clear, popup_area);
 
-        let shortcut_style = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
-        let desc_style = Style::default().fg(theme.fg);
+        let tab_bar_height = 1u16;
+        let footer_height = 1u16;
+        let border_height = 2u16; // top + bottom border
+        let content_height = popup_area.height.saturating_sub(tab_bar_height + footer_height + border_height);
+        let content_width = popup_area.width.saturating_sub(2); // left + right border
 
-        let commands = vec![
-            ("Alt+Enter", "Cycle Pane Focus between Canvas and Code"),
-            ("Arrows / hjkl", "Move / Select adjacent nodes"),
-            ("i / Enter", "Edit content of the selected node"),
-            ("a", "Open context-sensitive Options Menu"),
-            ("Ctrl+L", "Toggle Spatial Lock (Prevents accidental drags)"),
-            ("Ctrl+X", "Toggle External Editor Mode (Inline Node Editor)"),
-            ("Ctrl+O", "Toggle Arrow connections style (Canvas only)"),
-            ("Ctrl+S", "Save diagram safely to local storage"),
-            ("Ctrl+F", "Fit all nodes into view"),
-            ("Ctrl+R", "Cycle orientation (flowchart) / Reload from disk (canvas)"),
-            ("Ctrl+G", "Toggle background helper Grid lines"),
-            ("Ctrl+E", "Toggle Raw code layout Pane"),
-            ("Ctrl+j / +", "Zoom in the viewport dynamically"),
-            ("Ctrl+k / -", "Zoom out the viewport dynamically"),
-            ("Esc / q", "Dismiss focus / Deselect / Quit context"),
-            ("?", "Toggle and close this Help Popup"),
-        ];
+        // Tab bar
+        let tab_titles: Vec<Line> = crate::state::PinstarHelpTab::ALL.iter().map(|t| {
+            let name = t.title();
+            if *t == state.help_tab {
+                Line::from(Span::styled(
+                    format!(" {} ", name),
+                    Style::default().fg(theme.highlight_bg).bg(theme.accent).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    format!(" {} ", name),
+                    Style::default().fg(theme.muted),
+                ))
+            }
+        }).collect();
 
-        let mut lines = Vec::new();
-        lines.push(Line::from(""));
+        let tab_bar_area = Rect::new(
+            popup_area.x + 1,
+            popup_area.y + 1,
+            popup_area.width.saturating_sub(2),
+            tab_bar_height,
+        );
 
-        for (key, desc) in commands {
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {:18}", key), shortcut_style),
-                Span::raw(" : "),
-                Span::styled(desc, desc_style),
-            ]));
-        }
+        let tab_spans: Vec<Span> = tab_titles.iter().flat_map(|l| {
+            let mut s: Vec<Span> = l.spans.to_vec();
+            s.push(Span::raw(" "));
+            s
+        }).collect();
 
-        let help_widget = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.accent))
-                    .style(theme.bg_style())
-                    .title(Span::styled(
-                        " Pinstar Keyboard Shortcuts - Press ANY KEY to close ",
-                        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-                    )),
-            )
-            .alignment(Alignment::Left)
-            .wrap(ratatui::widgets::Wrap { trim: true });
+        let tab_bar = Paragraph::new(Line::from(tab_spans)).style(theme.bg_style());
+        frame.render_widget(tab_bar, tab_bar_area);
 
-        frame.render_widget(help_widget, popup_area);
+        // Separator line under tabs
+        let sep_area = Rect::new(
+            popup_area.x + 1,
+            popup_area.y + 1 + tab_bar_height,
+            popup_area.width.saturating_sub(2),
+            1,
+        );
+        let sep = Paragraph::new(Line::from(Span::styled(
+            "─".repeat(sep_area.width as usize),
+            Style::default().fg(theme.muted),
+        ))).style(theme.bg_style());
+        frame.render_widget(sep, sep_area);
+
+        // Content area
+        let content_area = Rect::new(
+            popup_area.x + 1,
+            popup_area.y + 2 + tab_bar_height,
+            content_width,
+            content_height,
+        );
+
+        let content_lines = crate::help::help_content(state.help_tab, theme, content_width);
+        let max_scroll = crate::help::help_content_height(state.help_tab).saturating_sub(content_height);
+        state.help_scroll = state.help_scroll.min(max_scroll);
+
+        let content_widget = Paragraph::new(content_lines)
+            .scroll((state.help_scroll, 0))
+            .style(theme.bg_style())
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(content_widget, content_area);
+
+        // Footer
+        let footer_area = Rect::new(
+            popup_area.x + 1,
+            popup_area.bottom().saturating_sub(1 + footer_height),
+            popup_area.width.saturating_sub(2),
+            footer_height,
+        );
+        let footer = Paragraph::new(Line::from(Span::styled(
+            " Tab: switch · j/k: scroll · Esc: close ",
+            Style::default().fg(theme.muted),
+        ))).style(theme.bg_style()).alignment(Alignment::Center);
+        frame.render_widget(footer, footer_area);
+
+        // Outer block / border
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.accent))
+            .style(theme.bg_style())
+            .title(Span::styled(
+                " Pinstar Help ",
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
+        frame.render_widget(block, popup_area);
     }
 }
 

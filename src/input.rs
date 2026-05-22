@@ -630,7 +630,33 @@ pub fn handle_pinstar_event(
     area: ratatui::layout::Rect,
 ) -> bool {
     if state.show_help {
-        state.show_help = false;
+        match key.code {
+            KeyCode::Tab => {
+                state.help_tab = state.help_tab.next();
+                state.help_scroll = 0;
+            }
+            KeyCode::BackTab => {
+                state.help_tab = state.help_tab.prev();
+                state.help_scroll = 0;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                state.help_scroll = state.help_scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.help_scroll = state.help_scroll.saturating_sub(1);
+            }
+            KeyCode::Char('G') | KeyCode::PageDown => {
+                state.help_scroll = state.help_scroll.saturating_add(10);
+            }
+            KeyCode::Char('g') | KeyCode::PageUp => {
+                state.help_scroll = state.help_scroll.saturating_sub(10);
+            }
+            _ => {
+                // Esc, q, ?, or any other key closes help
+                state.show_help = false;
+                state.help_scroll = 0;
+            }
+        }
         return true;
     }
 
