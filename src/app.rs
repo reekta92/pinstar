@@ -80,6 +80,36 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
         .unwrap_or_else(|_| "vi".to_string());
 
     while running {
+        if state.trigger_whole_file_editor {
+            state.trigger_whole_file_editor = false;
+
+            let parts: Vec<&str> = external_editor.split_whitespace().collect();
+            let (program, editor_args) = parts
+                .split_first()
+                .map(|(p, a)| (*p, a.to_vec()))
+                .unwrap_or(("vi", vec![]));
+
+            let mut command = std::process::Command::new("x-terminal-emulator");
+            command.arg("-e").arg(program);
+            for arg in &editor_args {
+                command.arg(arg);
+            }
+            command.arg(&state.path);
+
+            if command.spawn().is_err() {
+                // If generic x-terminal-emulator isn't present, gracefully degrade to suspended inline terminal edit
+                let _ = guard.suspend();
+                let mut fallback = std::process::Command::new(program);
+                for arg in &editor_args {
+                    fallback.arg(arg);
+                }
+                fallback.arg(&state.path);
+                let _ = fallback.status();
+                let _ = guard.resume();
+                let _ = state.reload();
+            }
+        }
+
         if state.trigger_ext_editor {
             state.trigger_ext_editor = false;
             if let Some(node_id) = &state.selected_node_id {
@@ -123,9 +153,16 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
                         }
                     }
                     let _ = state.save();
-                    state.sync_to_raw_editor();
                 }
                 let _ = std::fs::remove_file(&temp_file_path);
+            }
+        }
+
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            if let Ok(modified) = metadata.modified() {
+                if modified > state.last_modified {
+                    let _ = state.reload();
+                }
             }
         }
 

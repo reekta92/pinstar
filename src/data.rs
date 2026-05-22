@@ -1,10 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagramOrientation {
+    #[default]
+    TopDown,
+    LeftRight,
+    RightLeft,
+    DownTop,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasData {
     pub nodes: Vec<CanvasNode>,
     pub edges: Vec<CanvasEdge>,
+    #[serde(default)]
+    pub orientation: DiagramOrientation,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -14,6 +26,17 @@ pub enum CanvasNode {
     File(FileNode),
     Link(LinkNode),
     Group(GroupNode),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeShape {
+    #[default]
+    Rectangle,
+    Diamond,
+    Circle,
+    Cylinder,
+    Stadium,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -26,6 +49,8 @@ pub struct TextNode {
     pub height: f64,
     pub text: String,
     pub color: Option<String>,
+    #[serde(default)]
+    pub shape: NodeShape,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -65,6 +90,16 @@ pub struct GroupNode {
     pub color: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum EdgeStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+    Thick,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasEdge {
@@ -75,6 +110,8 @@ pub struct CanvasEdge {
     pub to_side: Option<String>,
     pub label: Option<String>,
     pub color: Option<String>,
+    #[serde(default)]
+    pub style: EdgeStyle,
 }
 
 impl CanvasNode {
@@ -120,6 +157,13 @@ impl CanvasNode {
             CanvasNode::File(n) => n.file = text,
             CanvasNode::Link(n) => n.url = text,
             CanvasNode::Group(n) => n.label = Some(text),
+        }
+    }
+
+    pub fn shape(&self) -> NodeShape {
+        match self {
+            CanvasNode::Text(n) => n.shape,
+            _ => NodeShape::Rectangle,
         }
     }
 }
