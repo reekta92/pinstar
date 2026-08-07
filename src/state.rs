@@ -183,11 +183,13 @@ impl PinstarState {
 
     pub fn save(&mut self) -> Result<()> {
         let original = std::fs::read_to_string(&self.path).unwrap_or_default();
-        let content = formats::save_to_format(&self.data, &original, self.format, self.has_layout_override)?;
+        let content =
+            formats::save_to_format(&self.data, &original, self.format, self.has_layout_override)?;
         std::fs::write(&self.path, &content)?;
 
         self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
-        self.raw_editor.set_cursor_line_style(ratatui::style::Style::default());
+        self.raw_editor
+            .set_cursor_line_style(ratatui::style::Style::default());
         self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
 
         if let Ok(metadata) = std::fs::metadata(&self.path) {
@@ -263,9 +265,10 @@ impl PinstarState {
         self.data = data;
         self.has_layout_override = content.contains("pinstar_layout:");
         self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
-        self.raw_editor.set_cursor_line_style(ratatui::style::Style::default());
+        self.raw_editor
+            .set_cursor_line_style(ratatui::style::Style::default());
         self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
-        
+
         if let Some(sel_id) = &self.selected_node_id {
             if !self.data.nodes.iter().any(|n| n.id() == sel_id) {
                 self.selected_node_id = None;
@@ -290,7 +293,9 @@ impl PinstarState {
         if let Ok(mut data) = formats::load_from_format(&self.path, &content, self.format) {
             self.record_undo_state();
             // Force re-layout if orientation changed
-            if data.orientation != self.data.orientation && self.format != formats::SupportedFormat::Canvas {
+            if data.orientation != self.data.orientation
+                && self.format != formats::SupportedFormat::Canvas
+            {
                 formats::apply_hierarchical_layout(&mut data);
             }
             self.has_layout_override = content.contains("pinstar_layout:");
@@ -331,10 +336,34 @@ impl PinstarState {
             return;
         }
 
-        let min_x = self.data.nodes.iter().map(|n| n.pos().0).reduce(f64::min).unwrap_or(0.0);
-        let min_y = self.data.nodes.iter().map(|n| n.pos().1).reduce(f64::min).unwrap_or(0.0);
-        let max_x = self.data.nodes.iter().map(|n| n.pos().0 + n.size().0).reduce(f64::max).unwrap_or(0.0);
-        let max_y = self.data.nodes.iter().map(|n| n.pos().1 + n.size().1).reduce(f64::max).unwrap_or(0.0);
+        let min_x = self
+            .data
+            .nodes
+            .iter()
+            .map(|n| n.pos().0)
+            .reduce(f64::min)
+            .unwrap_or(0.0);
+        let min_y = self
+            .data
+            .nodes
+            .iter()
+            .map(|n| n.pos().1)
+            .reduce(f64::min)
+            .unwrap_or(0.0);
+        let max_x = self
+            .data
+            .nodes
+            .iter()
+            .map(|n| n.pos().0 + n.size().0)
+            .reduce(f64::max)
+            .unwrap_or(0.0);
+        let max_y = self
+            .data
+            .nodes
+            .iter()
+            .map(|n| n.pos().1 + n.size().1)
+            .reduce(f64::max)
+            .unwrap_or(0.0);
 
         // Center of bounding box
         let cx = (min_x + max_x) / 2.0;
@@ -380,10 +409,10 @@ impl PinstarState {
             let (nw, nh) = node.size();
 
             // Compute exact screen coordinates identically to render.rs
-            let sx = ((nx - self.viewport_x) * self.zoom)
-                + (area.x as f64 + area.width as f64 / 2.0);
-            let sy = ((ny - self.viewport_y) * self.zoom)
-                + (area.y as f64 + area.height as f64 / 2.0);
+            let sx =
+                ((nx - self.viewport_x) * self.zoom) + (area.x as f64 + area.width as f64 / 2.0);
+            let sy =
+                ((ny - self.viewport_y) * self.zoom) + (area.y as f64 + area.height as f64 / 2.0);
             let sw = nw * self.zoom;
             let sh = nh * self.zoom;
 
@@ -422,7 +451,12 @@ impl PinstarState {
         best_hit.map(|(id, _, _)| id)
     }
 
-    pub fn select_node_at(&mut self, mx: u16, my: u16, area: ratatui::layout::Rect) -> Option<String> {
+    pub fn select_node_at(
+        &mut self,
+        mx: u16,
+        my: u16,
+        area: ratatui::layout::Rect,
+    ) -> Option<String> {
         if let Some(id) = self.node_at(mx, my, area) {
             self.selected_node_id = Some(id.clone());
             self.selected_edge_id = None;
@@ -459,29 +493,49 @@ impl PinstarState {
             self.selected_node_id = None;
             self.drag_captured_nodes.clear();
 
-            if self.format == crate::formats::SupportedFormat::Canvas || self.format == crate::formats::SupportedFormat::Mermaid {
+            if self.format == crate::formats::SupportedFormat::Canvas
+                || self.format == crate::formats::SupportedFormat::Mermaid
+            {
                 self.selected_edge_id = None;
                 return;
             }
 
             // If no nodes inside the box, fallback to selecting intersecting connections
             let mut found_edge = None;
-            let line_intersects_rect = |sx: f64, sy: f64, ex: f64, ey: f64, min_x: f64, min_y: f64, max_x: f64, max_y: f64| -> bool {
+            let line_intersects_rect = |sx: f64,
+                                        sy: f64,
+                                        ex: f64,
+                                        ey: f64,
+                                        min_x: f64,
+                                        min_y: f64,
+                                        max_x: f64,
+                                        max_y: f64|
+             -> bool {
                 let inside = |x: f64, y: f64| x >= min_x && x <= max_x && y >= min_y && y <= max_y;
                 if inside(sx, sy) || inside(ex, ey) {
                     return true;
                 }
-                let intersect = |x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, x4: f64, y4: f64| -> bool {
+                let intersect = |x1: f64,
+                                 y1: f64,
+                                 x2: f64,
+                                 y2: f64,
+                                 x3: f64,
+                                 y3: f64,
+                                 x4: f64,
+                                 y4: f64|
+                 -> bool {
                     let denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-                    if denom.abs() < 0.0001 { return false; }
+                    if denom.abs() < 0.0001 {
+                        return false;
+                    }
                     let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
                     let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
-                    ua >= 0.0 && ua <= 1.0 && ub >= 0.0 && ub <= 1.0
+                    (0.0..=1.0).contains(&ua) && (0.0..=1.0).contains(&ub)
                 };
-                intersect(sx, sy, ex, ey, min_x, min_y, max_x, min_y) ||
-                intersect(sx, sy, ex, ey, min_x, max_y, max_x, max_y) ||
-                intersect(sx, sy, ex, ey, min_x, min_y, min_x, max_y) ||
-                intersect(sx, sy, ex, ey, max_x, min_y, max_x, max_y)
+                intersect(sx, sy, ex, ey, min_x, min_y, max_x, min_y)
+                    || intersect(sx, sy, ex, ey, min_x, max_y, max_x, max_y)
+                    || intersect(sx, sy, ex, ey, min_x, min_y, min_x, max_y)
+                    || intersect(sx, sy, ex, ey, max_x, min_y, max_x, max_y)
             };
 
             for edge in &self.data.edges {
@@ -567,12 +621,16 @@ impl PinstarState {
             }
             self.floating_editor = None;
         } else if let Some(node_id) = &self.selected_node_id {
-            let text_opt = self.data.nodes.iter()
+            let text_opt = self
+                .data
+                .nodes
+                .iter()
                 .find(|n| n.id() == node_id)
                 .map(|n| n.text().to_string());
             if let Some(text) = text_opt {
                 self.record_undo_state();
-                let mut textarea = TextArea::from(text.lines().map(String::from).collect::<Vec<_>>());
+                let mut textarea =
+                    TextArea::from(text.lines().map(String::from).collect::<Vec<_>>());
                 textarea.set_cursor_line_style(ratatui::style::Style::default());
                 textarea.set_wrap_mode(WrapMode::WordOrGlyph);
                 self.floating_editor = Some(textarea);
@@ -669,18 +727,10 @@ impl PinstarState {
 
             for node in &mut self.data.nodes {
                 match node {
-                    crate::data::CanvasNode::Text(n) if n.id == old_id => {
-                        n.id = new_id.clone()
-                    }
-                    crate::data::CanvasNode::File(n) if n.id == old_id => {
-                        n.id = new_id.clone()
-                    }
-                    crate::data::CanvasNode::Link(n) if n.id == old_id => {
-                        n.id = new_id.clone()
-                    }
-                    crate::data::CanvasNode::Group(n) if n.id == old_id => {
-                        n.id = new_id.clone()
-                    }
+                    crate::data::CanvasNode::Text(n) if n.id == old_id => n.id = new_id.clone(),
+                    crate::data::CanvasNode::File(n) if n.id == old_id => n.id = new_id.clone(),
+                    crate::data::CanvasNode::Link(n) if n.id == old_id => n.id = new_id.clone(),
+                    crate::data::CanvasNode::Group(n) if n.id == old_id => n.id = new_id.clone(),
                     _ => {}
                 }
             }
@@ -757,8 +807,9 @@ impl PinstarState {
     pub fn add_text_node(&mut self, x: f64, y: f64) {
         self.record_undo_state();
         let id = format!("node_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        self.data.nodes.push(crate::data::CanvasNode::Text(
-            crate::data::TextNode {
+        self.data
+            .nodes
+            .push(crate::data::CanvasNode::Text(crate::data::TextNode {
                 id: id.clone(),
                 x,
                 y,
@@ -767,8 +818,7 @@ impl PinstarState {
                 text: "".to_string(),
                 color: None,
                 shape: Default::default(),
-            },
-        ));
+            }));
         self.selected_node_id = Some(id.clone());
         self.resizing_node_id = Some(id);
         let _ = self.save();
@@ -868,26 +918,25 @@ impl PinstarState {
                     break;
                 }
             }
-
         }
     }
 
     pub fn capture_group_children(&mut self) {
         self.drag_group_children.clear();
         let mut group_bounds = Vec::new();
-        
+
         if let Some(id) = &self.selected_node_id {
-            if let Some(node) = self.data.nodes.iter().find(|n| n.id() == id) {
-                if let crate::data::CanvasNode::Group(n) = node {
-                    group_bounds.push((n.x, n.y, n.width, n.height));
-                }
+            if let Some(crate::data::CanvasNode::Group(n)) =
+                self.data.nodes.iter().find(|n| n.id() == id)
+            {
+                group_bounds.push((n.x, n.y, n.width, n.height));
             }
         }
         for id in &self.drag_captured_nodes {
-            if let Some(node) = self.data.nodes.iter().find(|n| n.id() == id) {
-                if let crate::data::CanvasNode::Group(n) = node {
-                    group_bounds.push((n.x, n.y, n.width, n.height));
-                }
+            if let Some(crate::data::CanvasNode::Group(n)) =
+                self.data.nodes.iter().find(|n| n.id() == id)
+            {
+                group_bounds.push((n.x, n.y, n.width, n.height));
             }
         }
 
@@ -895,7 +944,7 @@ impl PinstarState {
         for (gx, gy, gw, gh) in group_bounds {
             for node in &self.data.nodes {
                 let nid = node.id();
-                if self.selected_node_id.as_ref().map_or(true, |id| id != nid)
+                if self.selected_node_id.as_ref().is_none_or(|id| id != nid)
                     && !self.drag_captured_nodes.contains(nid)
                 {
                     let (nx, ny) = node.pos();
@@ -913,7 +962,9 @@ impl PinstarState {
     }
 
     pub fn move_selected_node(&mut self, dx: f64, dy: f64) {
-        if (dx.abs() > 0.001 || dy.abs() > 0.001) && (self.selected_node_id.is_some() || !self.drag_captured_nodes.is_empty()) {
+        if (dx.abs() > 0.001 || dy.abs() > 0.001)
+            && (self.selected_node_id.is_some() || !self.drag_captured_nodes.is_empty())
+        {
             self.has_layout_override = true;
         }
         if self.selected_node_id.is_some() || !self.drag_captured_nodes.is_empty() {
@@ -951,11 +1002,13 @@ impl PinstarState {
                     }
                 }
             }
-
         }
     }
 
-    pub fn get_edge_segments(&self, edge: &crate::data::CanvasEdge) -> Option<Vec<(f64, f64, f64, f64)>> {
+    pub fn get_edge_segments(
+        &self,
+        edge: &crate::data::CanvasEdge,
+    ) -> Option<Vec<(f64, f64, f64, f64)>> {
         let from_node = self.data.nodes.iter().find(|n| n.id() == edge.from_node)?;
         let to_node = self.data.nodes.iter().find(|n| n.id() == edge.to_node)?;
 
@@ -994,10 +1047,18 @@ impl PinstarState {
         let segments = if use_orthogonal {
             if is_horiz {
                 let mid_x = (ax + bx) / 2.0;
-                vec![(ax, ay, mid_x, ay), (mid_x, ay, mid_x, by), (mid_x, by, bx, by)]
+                vec![
+                    (ax, ay, mid_x, ay),
+                    (mid_x, ay, mid_x, by),
+                    (mid_x, by, bx, by),
+                ]
             } else {
                 let mid_y = (ay + by) / 2.0;
-                vec![(ax, ay, ax, mid_y), (ax, mid_y, bx, mid_y), (bx, mid_y, bx, by)]
+                vec![
+                    (ax, ay, ax, mid_y),
+                    (ax, mid_y, bx, mid_y),
+                    (bx, mid_y, bx, by),
+                ]
             }
         } else {
             vec![(ax, ay, bx, by)]
@@ -1091,7 +1152,9 @@ impl PinstarState {
         self.record_undo_state();
         self.data.orientation = match self.data.orientation {
             crate::data::DiagramOrientation::TopDown => crate::data::DiagramOrientation::LeftRight,
-            crate::data::DiagramOrientation::LeftRight => crate::data::DiagramOrientation::RightLeft,
+            crate::data::DiagramOrientation::LeftRight => {
+                crate::data::DiagramOrientation::RightLeft
+            }
             crate::data::DiagramOrientation::RightLeft => crate::data::DiagramOrientation::DownTop,
             crate::data::DiagramOrientation::DownTop => crate::data::DiagramOrientation::TopDown,
         };
@@ -1101,10 +1164,7 @@ impl PinstarState {
     }
 
     pub fn open_edge_context_menu(&mut self, x: u16, y: u16) {
-        let mut items = vec![
-            "Set Color...".to_string(),
-            "Set Style...".to_string(),
-        ];
+        let mut items = vec!["Set Color...".to_string(), "Set Style...".to_string()];
         if self.format == SupportedFormat::Mermaid {
             items.retain(|item| item != "Set Color..." && item != "Set Style...");
         }

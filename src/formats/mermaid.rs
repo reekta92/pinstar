@@ -1,6 +1,6 @@
-use crate::data::{CanvasData, CanvasNode, CanvasEdge, TextNode};
-use regex::Regex;
+use crate::data::{CanvasData, CanvasEdge, CanvasNode, TextNode};
 use anyhow::Result;
+use regex::Regex;
 use std::collections::HashMap;
 
 pub fn parse(content: &str) -> Result<CanvasData> {
@@ -22,10 +22,18 @@ pub fn parse(content: &str) -> Result<CanvasData> {
     let mut shapes_map = HashMap::new();
     let mut orientation = crate::data::DiagramOrientation::TopDown;
 
-    let meta_re = Regex::new(r"^%\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)").unwrap();
+    let meta_re = Regex::new(
+        r"^%\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)",
+    )
+    .unwrap();
     let node_decl_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(\[+|\(+|\{+)(.*?)(\]+|\)+|\}+)").unwrap();
-    let edge_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(-{2,}>|={2,}>|-\.-\->)\s*([a-zA-Z0-9_\-]+)").unwrap();
-    let edge_label_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(-{2,}|={2,}|-\.-)\s*(.*?)\s*(?:-->|==>|\.->)\s*([a-zA-Z0-9_\-]+)").unwrap();
+    let edge_re =
+        Regex::new(r"([a-zA-Z0-9_\-]+)\s*(-{2,}>|={2,}>|-\.-\->)\s*([a-zA-Z0-9_\-]+)").unwrap();
+    let edge_label_re = Regex::new(
+        r"([a-zA-Z0-9_\-]+)\s*(-{2,}|={2,}|-\.-)\s*(.*?)\s*(?:-->|==>|\.->)\s*([a-zA-Z0-9_\-]+)",
+    )
+    .unwrap();
+    let lone_id_re = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
 
     for line in mermaid_block.lines() {
         let mut line_str = line.trim().to_string();
@@ -55,9 +63,17 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 orientation = crate::data::DiagramOrientation::LeftRight;
             } else if upper_line.contains(" RL") || upper_line.contains("\tRL") {
                 orientation = crate::data::DiagramOrientation::RightLeft;
-            } else if upper_line.contains(" DT") || upper_line.contains("\tDT") || upper_line.contains(" BT") || upper_line.contains("\tBT") {
+            } else if upper_line.contains(" DT")
+                || upper_line.contains("\tDT")
+                || upper_line.contains(" BT")
+                || upper_line.contains("\tBT")
+            {
                 orientation = crate::data::DiagramOrientation::DownTop;
-            } else if upper_line.contains(" TD") || upper_line.contains("\tTD") || upper_line.contains(" TB") || upper_line.contains("\tTB") {
+            } else if upper_line.contains(" TD")
+                || upper_line.contains("\tTD")
+                || upper_line.contains(" TB")
+                || upper_line.contains("\tTB")
+            {
                 orientation = crate::data::DiagramOrientation::TopDown;
             }
             continue;
@@ -111,9 +127,11 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 crate::data::EdgeStyle::Solid
             };
 
-            nodes_map.entry(from.clone()).or_insert_with(|| from.clone());
+            nodes_map
+                .entry(from.clone())
+                .or_insert_with(|| from.clone());
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
-            
+
             edges.push(CanvasEdge {
                 id: format!("edge_{}_{}", from, to),
                 from_node: from,
@@ -136,7 +154,9 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 crate::data::EdgeStyle::Solid
             };
 
-            nodes_map.entry(from.clone()).or_insert_with(|| from.clone());
+            nodes_map
+                .entry(from.clone())
+                .or_insert_with(|| from.clone());
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
 
             edges.push(CanvasEdge {
@@ -151,7 +171,6 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             });
         } else {
             // Lone single node ID with no shapes
-            let lone_id_re = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
             if lone_id_re.is_match(&line_str) {
                 nodes_map.entry(line_str.clone()).or_insert(line_str);
             }
@@ -160,8 +179,14 @@ pub fn parse(content: &str) -> Result<CanvasData> {
 
     let mut canvas_nodes = Vec::new();
     for (id, label) in nodes_map {
-        let (x, y, w, h) = positions.get(&id).copied().unwrap_or((0.0, 0.0, 200.0, 100.0));
-        let shape = shapes_map.get(&id).copied().unwrap_or(crate::data::NodeShape::Rectangle);
+        let (x, y, w, h) = positions
+            .get(&id)
+            .copied()
+            .unwrap_or((0.0, 0.0, 200.0, 100.0));
+        let shape = shapes_map
+            .get(&id)
+            .copied()
+            .unwrap_or(crate::data::NodeShape::Rectangle);
         canvas_nodes.push(CanvasNode::Text(TextNode {
             id,
             x,
@@ -195,7 +220,14 @@ pub fn serialize(data: &CanvasData, original_content: &str, write_layout: bool) 
         for node in &data.nodes {
             let (x, y) = node.pos();
             let (w, h) = node.size();
-            block_buf.push_str(&format!("    %% pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n", node.id(), x, y, w, h));
+            block_buf.push_str(&format!(
+                "    %% pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n",
+                node.id(),
+                x,
+                y,
+                w,
+                h
+            ));
         }
     }
 
@@ -209,7 +241,13 @@ pub fn serialize(data: &CanvasData, original_content: &str, write_layout: bool) 
             crate::data::NodeShape::Stadium => ("([\"", "\"])"),
             _ => ("[\"", "\"]"),
         };
-        block_buf.push_str(&format!("    {}{}{}{}\n", node.id(), l_bracket, escaped_txt, r_bracket));
+        block_buf.push_str(&format!(
+            "    {}{}{}{}\n",
+            node.id(),
+            l_bracket,
+            escaped_txt,
+            r_bracket
+        ));
     }
 
     // Emit connections
@@ -217,9 +255,19 @@ pub fn serialize(data: &CanvasData, original_content: &str, write_layout: bool) 
         if let Some(ref l) = edge.label {
             let escaped_lbl = l.replace('"', "\\\"");
             match edge.style {
-                crate::data::EdgeStyle::Thick => block_buf.push_str(&format!("    {} == \"{}\" ==> {}\n", edge.from_node, escaped_lbl, edge.to_node)),
-                crate::data::EdgeStyle::Dashed | crate::data::EdgeStyle::Dotted => block_buf.push_str(&format!("    {} -. \"{}\" .-> {}\n", edge.from_node, escaped_lbl, edge.to_node)),
-                _ => block_buf.push_str(&format!("    {} -- \"{}\" --> {}\n", edge.from_node, escaped_lbl, edge.to_node)),
+                crate::data::EdgeStyle::Thick => block_buf.push_str(&format!(
+                    "    {} == \"{}\" ==> {}\n",
+                    edge.from_node, escaped_lbl, edge.to_node
+                )),
+                crate::data::EdgeStyle::Dashed | crate::data::EdgeStyle::Dotted => block_buf
+                    .push_str(&format!(
+                        "    {} -. \"{}\" .-> {}\n",
+                        edge.from_node, escaped_lbl, edge.to_node
+                    )),
+                _ => block_buf.push_str(&format!(
+                    "    {} -- \"{}\" --> {}\n",
+                    edge.from_node, escaped_lbl, edge.to_node
+                )),
             }
         } else {
             let arrow = match edge.style {
@@ -227,7 +275,10 @@ pub fn serialize(data: &CanvasData, original_content: &str, write_layout: bool) 
                 crate::data::EdgeStyle::Dashed | crate::data::EdgeStyle::Dotted => "-.->",
                 _ => "-->",
             };
-            block_buf.push_str(&format!("    {} {} {}\n", edge.from_node, arrow, edge.to_node));
+            block_buf.push_str(&format!(
+                "    {} {} {}\n",
+                edge.from_node, arrow, edge.to_node
+            ));
         }
     }
 
@@ -235,9 +286,11 @@ pub fn serialize(data: &CanvasData, original_content: &str, write_layout: bool) 
     if original_content.contains("```mermaid") {
         let re = Regex::new(r"(?s)(```mermaid\s*\n).*?(\n```)").unwrap();
         if re.is_match(original_content) {
-            let output = re.replace(original_content, |caps: &regex::Captures| {
-                format!("{}{}{}", &caps[1], block_buf, &caps[2])
-            }).to_string();
+            let output = re
+                .replace(original_content, |caps: &regex::Captures| {
+                    format!("{}{}{}", &caps[1], block_buf, &caps[2])
+                })
+                .to_string();
             return Ok(output);
         }
     }
@@ -265,9 +318,13 @@ mod tests {
         let content = "graph DT\nA --> B";
         let data = parse(content).unwrap();
         assert_eq!(data.orientation, crate::data::DiagramOrientation::DownTop);
-        
+
         let serial = serialize(&data, content, false).unwrap();
-        assert!(serial.contains("graph DT"), "Serialized string should contain graph DT but was: {}", serial);
+        assert!(
+            serial.contains("graph DT"),
+            "Serialized string should contain graph DT but was: {}",
+            serial
+        );
     }
 
     #[test]
@@ -275,9 +332,13 @@ mod tests {
         let content = "# Doc\n```mermaid\ngraph DT\nA --> B\n```\nFooter";
         let data = parse(content).unwrap();
         assert_eq!(data.orientation, crate::data::DiagramOrientation::DownTop);
-        
+
         let serial = serialize(&data, content, false).unwrap();
-        assert!(serial.contains("graph DT"), "Markdown output should preserve graph DT but was: {}", serial);
+        assert!(
+            serial.contains("graph DT"),
+            "Markdown output should preserve graph DT but was: {}",
+            serial
+        );
         assert!(serial.contains("# Doc"), "Markdown header lost!");
         assert!(serial.contains("Footer"), "Markdown footer lost!");
     }

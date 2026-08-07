@@ -1,10 +1,10 @@
-pub mod mermaid;
 pub mod dot;
+pub mod mermaid;
 pub mod plantuml;
 
-use std::path::Path;
 use crate::data::{CanvasData, CanvasNode};
 use anyhow::Result;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SupportedFormat {
@@ -16,12 +16,21 @@ pub enum SupportedFormat {
 
 impl SupportedFormat {
     pub fn is_flowchart(self) -> bool {
-        matches!(self, SupportedFormat::Mermaid | SupportedFormat::Dot | SupportedFormat::PlantUml)
+        matches!(
+            self,
+            SupportedFormat::Mermaid | SupportedFormat::Dot | SupportedFormat::PlantUml
+        )
     }
 }
 
 pub fn detect_format(path: &Path) -> SupportedFormat {
-    match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
         "canvas" => SupportedFormat::Canvas,
         "md" | "markdown" | "mermaid" | "mmd" => SupportedFormat::Mermaid,
         "dot" | "gv" => SupportedFormat::Dot,
@@ -30,7 +39,11 @@ pub fn detect_format(path: &Path) -> SupportedFormat {
     }
 }
 
-pub fn load_from_format(_path: &Path, content: &str, format: SupportedFormat) -> Result<CanvasData> {
+pub fn load_from_format(
+    _path: &Path,
+    content: &str,
+    format: SupportedFormat,
+) -> Result<CanvasData> {
     let mut data = match format {
         SupportedFormat::Canvas => serde_json::from_str(content)?,
         SupportedFormat::Mermaid => mermaid::parse(content)?,
@@ -55,7 +68,12 @@ pub fn load_from_format(_path: &Path, content: &str, format: SupportedFormat) ->
     Ok(data)
 }
 
-pub fn save_to_format(data: &CanvasData, original_content: &str, format: SupportedFormat, write_layout: bool) -> Result<String> {
+pub fn save_to_format(
+    data: &CanvasData,
+    original_content: &str,
+    format: SupportedFormat,
+    write_layout: bool,
+) -> Result<String> {
     match format {
         SupportedFormat::Canvas => serde_json::to_string_pretty(data).map_err(Into::into),
         SupportedFormat::Mermaid => mermaid::serialize(data, original_content, write_layout),
@@ -74,9 +92,9 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
 
     // Initial layout in a neat circle to prevent node collapse
     let radius = 150.0 * (n as f64).sqrt();
-    for i in 0..n {
+    for (i, pos) in positions.iter_mut().enumerate().take(n) {
         let angle = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
-        positions[i] = (angle.cos() * radius, angle.sin() * radius);
+        *pos = (angle.cos() * radius, angle.sin() * radius);
     }
 
     let iterations = 80;
@@ -84,7 +102,11 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
     let k = (area / n as f64).sqrt() * 0.6; // Optimal node distance
     let mut temp = 150.0;
 
-    let node_ids: Vec<String> = data.nodes.iter().map(|node| node.id().to_string()).collect();
+    let node_ids: Vec<String> = data
+        .nodes
+        .iter()
+        .map(|node| node.id().to_string())
+        .collect();
 
     for _ in 0..iterations {
         let mut displacements = vec![(0.0, 0.0); n];
@@ -92,11 +114,13 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
         // Repulsive forces between all node pairs
         for i in 0..n {
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 let dx = positions[i].0 - positions[j].0;
                 let dy = positions[i].1 - positions[j].1;
                 let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                
+
                 // Force decreases with distance
                 let force = (k * k) / dist;
                 displacements[i].0 += (dx / dist) * force;
@@ -112,7 +136,7 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
                 let dx = positions[i].0 - positions[j].0;
                 let dy = positions[i].1 - positions[j].1;
                 let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                
+
                 // Force increases with distance
                 let force = (dist * dist) / k;
                 let ux = dx / dist;
@@ -130,7 +154,7 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
             let disp_x = displacements[i].0;
             let disp_y = displacements[i].1;
             let disp_len = (disp_x * disp_x + disp_y * disp_y).sqrt().max(1.0);
-            
+
             let capped_disp = disp_len.min(temp);
             positions[i].0 += (disp_x / disp_len) * capped_disp;
             positions[i].1 += (disp_y / disp_len) * capped_disp;
@@ -143,17 +167,37 @@ pub fn apply_force_directed_layout(data: &mut CanvasData) {
     // Copy positions and update dimensions back to nodes
     for (i, node) in data.nodes.iter_mut().enumerate() {
         let (x, y) = positions[i];
-        
+
         // Calculate intuitive default dimensions based on label text
         let label = node.text();
-        let width = (label.len() * 9).max(120).min(400) as f64;
-        let height = (2 + label.lines().count() * 20).max(60).min(200) as f64;
+        let width = (label.len() * 9).clamp(120, 400) as f64;
+        let height = (2 + label.lines().count() * 20).clamp(60, 200) as f64;
 
         match node {
-            CanvasNode::Text(n) => { n.x = x - width/2.0; n.y = y - height/2.0; n.width = width; n.height = height; },
-            CanvasNode::File(n) => { n.x = x - width/2.0; n.y = y - height/2.0; n.width = width; n.height = height; },
-            CanvasNode::Link(n) => { n.x = x - width/2.0; n.y = y - height/2.0; n.width = width; n.height = height; },
-            CanvasNode::Group(n) => { n.x = x - width/2.0; n.y = y - height/2.0; n.width = width; n.height = height; },
+            CanvasNode::Text(n) => {
+                n.x = x - width / 2.0;
+                n.y = y - height / 2.0;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::File(n) => {
+                n.x = x - width / 2.0;
+                n.y = y - height / 2.0;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::Link(n) => {
+                n.x = x - width / 2.0;
+                n.y = y - height / 2.0;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::Group(n) => {
+                n.x = x - width / 2.0;
+                n.y = y - height / 2.0;
+                n.width = width;
+                n.height = height;
+            }
         }
     }
 }
@@ -165,7 +209,11 @@ pub fn apply_hierarchical_layout(data: &mut CanvasData) {
     }
 
     use std::collections::{HashMap, VecDeque};
-    let node_ids: Vec<String> = data.nodes.iter().map(|node| node.id().to_string()).collect();
+    let node_ids: Vec<String> = data
+        .nodes
+        .iter()
+        .map(|node| node.id().to_string())
+        .collect();
     let mut in_degree: HashMap<String, usize> = HashMap::new();
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -176,7 +224,9 @@ pub fn apply_hierarchical_layout(data: &mut CanvasData) {
 
     for edge in &data.edges {
         if in_degree.contains_key(&edge.from_node) && in_degree.contains_key(&edge.to_node) {
-            adj.get_mut(&edge.from_node).unwrap().push(edge.to_node.clone());
+            adj.get_mut(&edge.from_node)
+                .unwrap()
+                .push(edge.to_node.clone());
             *in_degree.get_mut(&edge.to_node).unwrap() += 1;
         }
     }
@@ -202,7 +252,9 @@ pub fn apply_hierarchical_layout(data: &mut CanvasData) {
         if let Some(neighbors) = adj.get(&current) {
             for neighbor in neighbors {
                 let current_rank = ranks.get(neighbor).copied().unwrap_or(0);
-                if rank + 1 < node_ids.len() && (!ranks.contains_key(neighbor) || rank + 1 > current_rank) {
+                if rank + 1 < node_ids.len()
+                    && (!ranks.contains_key(neighbor) || rank + 1 > current_rank)
+                {
                     ranks.insert(neighbor.clone(), rank + 1);
                     queue.push_back((neighbor.clone(), rank + 1));
                 }
@@ -228,7 +280,7 @@ pub fn apply_hierarchical_layout(data: &mut CanvasData) {
     for node in &mut data.nodes {
         let id = node.id().to_string();
         let rank = ranks.get(&id).copied().unwrap_or(0);
-        
+
         let idx_in_rank = if let Some(siblings) = rank_groups.get(&rank) {
             siblings.iter().position(|x| x == &id).unwrap_or(0)
         } else {
@@ -275,17 +327,37 @@ pub fn apply_hierarchical_layout(data: &mut CanvasData) {
         };
 
         let label = node.text();
-        let width = (label.len() * 9).max(120).min(400) as f64;
-        let height = (2 + label.lines().count() * 20).max(60).min(200) as f64;
+        let width = (label.len() * 9).clamp(120, 400) as f64;
+        let height = (2 + label.lines().count() * 20).clamp(60, 200) as f64;
 
         let x = px - width / 2.0;
         let y = py - height / 2.0;
 
         match node {
-            CanvasNode::Text(n) => { n.x = x; n.y = y; n.width = width; n.height = height; }
-            CanvasNode::File(n) => { n.x = x; n.y = y; n.width = width; n.height = height; }
-            CanvasNode::Link(n) => { n.x = x; n.y = y; n.width = width; n.height = height; }
-            CanvasNode::Group(n) => { n.x = x; n.y = y; n.width = width; n.height = height; }
+            CanvasNode::Text(n) => {
+                n.x = x;
+                n.y = y;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::File(n) => {
+                n.x = x;
+                n.y = y;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::Link(n) => {
+                n.x = x;
+                n.y = y;
+                n.width = width;
+                n.height = height;
+            }
+            CanvasNode::Group(n) => {
+                n.x = x;
+                n.y = y;
+                n.width = width;
+                n.height = height;
+            }
         }
     }
 }

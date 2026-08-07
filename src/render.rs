@@ -1,4 +1,4 @@
-use crate::helpers::{fill_cursor_line_bg, get_textarea_scroll, line_number_gutter, PinstarTheme};
+use crate::helpers::{PinstarTheme, fill_cursor_line_bg, get_textarea_scroll, line_number_gutter};
 use crate::state::PinstarState;
 use ratatui::{prelude::*, widgets::*};
 
@@ -139,7 +139,10 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         }
     }
 
-    let mut groups: Vec<&crate::data::CanvasNode> = state.data.nodes.iter()
+    let mut groups: Vec<&crate::data::CanvasNode> = state
+        .data
+        .nodes
+        .iter()
         .filter(|n| matches!(n, crate::data::CanvasNode::Group(_)))
         .collect();
 
@@ -149,7 +152,9 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let (wb, hb) = b.size();
         let area_a = wa * ha;
         let area_b = wb * hb;
-        area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
+        area_b
+            .partial_cmp(&area_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     for node in groups {
@@ -194,10 +199,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             let base_color = PinstarTheme::parse_color(g.color.as_deref(), theme);
 
             let is_connected_to_selected = if let Some(sel_id) = &state.selected_node_id {
-                sel_id != &g.id && state.data.edges.iter().any(|e| {
-                    (e.from_node == *sel_id && e.to_node == g.id) ||
-                    (e.to_node == *sel_id && e.from_node == g.id)
-                })
+                sel_id != &g.id
+                    && state.data.edges.iter().any(|e| {
+                        (e.from_node == *sel_id && e.to_node == g.id)
+                            || (e.to_node == *sel_id && e.from_node == g.id)
+                    })
             } else {
                 false
             };
@@ -218,10 +224,13 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             let mut block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
-                .title(Line::from(Span::styled(
-                    label,
-                    Style::default().fg(if is_editing { theme.accent } else { base_color }),
-                )).alignment(Alignment::Center))
+                .title(
+                    Line::from(Span::styled(
+                        label,
+                        Style::default().fg(if is_editing { theme.accent } else { base_color }),
+                    ))
+                    .alignment(Alignment::Center),
+                )
                 .style(theme.bg_style());
 
             if is_selected && !is_editing {
@@ -247,12 +256,20 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
 
             // Draw titlebar background — clickable area indicator for groups
             if node_rect.height >= 3 {
-                let tbar = Rect::new(node_rect.x + 1, node_rect.y + 1, node_rect.width.saturating_sub(2), 1);
-                let tbar_color = if is_selected { theme.accent } else { theme.muted };
+                let tbar = Rect::new(
+                    node_rect.x + 1,
+                    node_rect.y + 1,
+                    node_rect.width.saturating_sub(2),
+                    1,
+                );
+                let tbar_color = if is_selected {
+                    theme.accent
+                } else {
+                    theme.muted
+                };
                 frame.render_widget(
-                    Paragraph::new(" ".repeat(tbar.width as usize)).style(
-                        Style::default().bg(tbar_color),
-                    ),
+                    Paragraph::new(" ".repeat(tbar.width as usize))
+                        .style(Style::default().bg(tbar_color)),
                     tbar,
                 );
             }
@@ -381,15 +398,35 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             let buf = frame.buffer_mut();
 
             let draw_box_line = |buf: &mut ratatui::prelude::Buffer,
-                                  x1: i32, y1: i32, x2: i32, y2: i32,
-                                  horz_char: char, vert_char: char| {
+                                 x1: i32,
+                                 y1: i32,
+                                 x2: i32,
+                                 y2: i32,
+                                 horz_char: char,
+                                 vert_char: char| {
                 if y1 == y2 {
                     let (start, end) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
                     for x in start..=end {
-                        if x < canvas_area.left() as i32 || x >= canvas_area.right() as i32 || y1 < canvas_area.top() as i32 || y1 >= canvas_area.bottom() as i32 { continue; }
+                        if x < canvas_area.left() as i32
+                            || x >= canvas_area.right() as i32
+                            || y1 < canvas_area.top() as i32
+                            || y1 >= canvas_area.bottom() as i32
+                        {
+                            continue;
+                        }
                         let ch = match effective_style {
-                            crate::data::EdgeStyle::Dotted => { if (x - start) % 4 != 0 { continue; } horz_char }
-                            crate::data::EdgeStyle::Dashed => { if (x - start) % 8 >= 4 { continue; } horz_char }
+                            crate::data::EdgeStyle::Dotted => {
+                                if (x - start) % 4 != 0 {
+                                    continue;
+                                }
+                                horz_char
+                            }
+                            crate::data::EdgeStyle::Dashed => {
+                                if (x - start) % 8 >= 4 {
+                                    continue;
+                                }
+                                horz_char
+                            }
                             _ => horz_char,
                         };
                         if let Some(cell) = buf.cell_mut((x as u16, y1 as u16)) {
@@ -399,10 +436,26 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                 } else if x1 == x2 {
                     let (start, end) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
                     for y in start..=end {
-                        if x1 < canvas_area.left() as i32 || x1 >= canvas_area.right() as i32 || y < canvas_area.top() as i32 || y >= canvas_area.bottom() as i32 { continue; }
+                        if x1 < canvas_area.left() as i32
+                            || x1 >= canvas_area.right() as i32
+                            || y < canvas_area.top() as i32
+                            || y >= canvas_area.bottom() as i32
+                        {
+                            continue;
+                        }
                         let ch = match effective_style {
-                            crate::data::EdgeStyle::Dotted => { if (y - start) % 4 != 0 { continue; } vert_char }
-                            crate::data::EdgeStyle::Dashed => { if (y - start) % 8 >= 4 { continue; } vert_char }
+                            crate::data::EdgeStyle::Dotted => {
+                                if (y - start) % 4 != 0 {
+                                    continue;
+                                }
+                                vert_char
+                            }
+                            crate::data::EdgeStyle::Dashed => {
+                                if (y - start) % 8 >= 4 {
+                                    continue;
+                                }
+                                vert_char
+                            }
                             _ => vert_char,
                         };
                         if let Some(cell) = buf.cell_mut((x1 as u16, y as u16)) {
@@ -413,7 +466,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             };
 
             let draw_corner = |buf: &mut ratatui::prelude::Buffer, x: i32, y: i32, ch: char| {
-                if x >= canvas_area.left() as i32 && x < canvas_area.right() as i32 && y >= canvas_area.top() as i32 && y < canvas_area.bottom() as i32 {
+                if x >= canvas_area.left() as i32
+                    && x < canvas_area.right() as i32
+                    && y >= canvas_area.top() as i32
+                    && y < canvas_area.bottom() as i32
+                {
                     if let Some(cell) = buf.cell_mut((x as u16, y as u16)) {
                         cell.set_char(ch).set_fg(edge_color);
                     }
@@ -421,7 +478,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             };
 
             let draw_arrow = |buf: &mut ratatui::prelude::Buffer, ch: char, col: i32, row: i32| {
-                if col >= canvas_area.left() as i32 && col < canvas_area.right() as i32 && row >= canvas_area.top() as i32 && row < canvas_area.bottom() as i32 {
+                if col >= canvas_area.left() as i32
+                    && col < canvas_area.right() as i32
+                    && row >= canvas_area.top() as i32
+                    && row < canvas_area.bottom() as i32
+                {
                     if let Some(cell) = buf.cell_mut((col as u16, row as u16)) {
                         cell.set_char(ch).set_fg(edge_color);
                     }
@@ -515,37 +576,36 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                         crate::data::EdgeStyle::Dashed => step % 16 < 8,
                         _ => true,
                     };
-                    if should_draw {
-                        if cx >= canvas_area.left() as f64
-                            && cx < canvas_area.right() as f64
-                            && cy >= canvas_area.top() as f64
-                            && cy < canvas_area.bottom() as f64
-                        {
-                            let cell_x = cx as u16;
-                            let cell_y = cy as u16;
-                            let dot_x = ((cx - cell_x as f64) * 2.0) as u16;
-                            let dot_y = ((cy - cell_y as f64) * 4.0) as u16;
-                            if let Some(cell) = buf.cell_mut((cell_x, cell_y)) {
-                                let mut braille_char =
-                                    cell.symbol().chars().next().unwrap_or('\u{2800}');
-                                if !('\u{2800}'..='\u{28FF}').contains(&braille_char) {
-                                    braille_char = '\u{2800}';
-                                }
-                                let dot_bit = match (dot_x, dot_y) {
-                                    (0, 0) => 0x01,
-                                    (0, 1) => 0x02,
-                                    (0, 2) => 0x04,
-                                    (1, 0) => 0x08,
-                                    (1, 1) => 0x10,
-                                    (1, 2) => 0x20,
-                                    (0, 3) => 0x40,
-                                    (1, 3) => 0x80,
-                                    _ => 0,
-                                };
-                                let new_code = (braille_char as u32 - 0x2800) | dot_bit;
-                                if let Some(c) = char::from_u32(0x2800 + new_code) {
-                                    cell.set_char(c).set_fg(edge_color);
-                                }
+                    if should_draw
+                        && cx >= canvas_area.left() as f64
+                        && cx < canvas_area.right() as f64
+                        && cy >= canvas_area.top() as f64
+                        && cy < canvas_area.bottom() as f64
+                    {
+                        let cell_x = cx as u16;
+                        let cell_y = cy as u16;
+                        let dot_x = ((cx - cell_x as f64) * 2.0) as u16;
+                        let dot_y = ((cy - cell_y as f64) * 4.0) as u16;
+                        if let Some(cell) = buf.cell_mut((cell_x, cell_y)) {
+                            let mut braille_char =
+                                cell.symbol().chars().next().unwrap_or('\u{2800}');
+                            if !('\u{2800}'..='\u{28FF}').contains(&braille_char) {
+                                braille_char = '\u{2800}';
+                            }
+                            let dot_bit = match (dot_x, dot_y) {
+                                (0, 0) => 0x01,
+                                (0, 1) => 0x02,
+                                (0, 2) => 0x04,
+                                (1, 0) => 0x08,
+                                (1, 1) => 0x10,
+                                (1, 2) => 0x20,
+                                (0, 3) => 0x40,
+                                (1, 3) => 0x80,
+                                _ => 0,
+                            };
+                            let new_code = (braille_char as u32 - 0x2800) | dot_bit;
+                            if let Some(c) = char::from_u32(0x2800 + new_code) {
+                                cell.set_char(c).set_fg(edge_color);
                             }
                         }
                     }
@@ -610,10 +670,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let base_color = PinstarTheme::parse_color(node_color_attr, theme);
 
         let is_connected_to_selected = if let Some(sel_id) = &state.selected_node_id {
-            sel_id != node.id() && state.data.edges.iter().any(|e| {
-                (e.from_node == *sel_id && e.to_node == node.id()) ||
-                (e.to_node == *sel_id && e.from_node == node.id())
-            })
+            sel_id != node.id()
+                && state.data.edges.iter().any(|e| {
+                    (e.from_node == *sel_id && e.to_node == node.id())
+                        || (e.to_node == *sel_id && e.from_node == node.id())
+                })
         } else {
             false
         };
@@ -660,8 +721,7 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             }
         };
 
-        let mut block = Block::default()
-            .style(theme.bg_style());
+        let mut block = Block::default().style(theme.bg_style());
 
         if !use_braille_border {
             block = block
@@ -684,31 +744,39 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             }
         }
 
-        let get_text_with_divider = |original: &str, inner_w: usize, color: ratatui::style::Color| -> ratatui::text::Text {
-            if original.split('\n').any(|l| l.trim_end_matches('\r').trim() == "---") {
-                let divider = if inner_w > 0 { "─".repeat(inner_w) } else { "---".to_string() };
-                let mut lines = Vec::new();
-                for line in original.split('\n') {
-                    let clean = line.trim_end_matches('\r');
-                    if clean.trim() == "---" {
-                        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-                            divider.clone(),
-                            Style::default().fg(color),
-                        )));
+        let get_text_with_divider =
+            |original: &str, inner_w: usize, color: ratatui::style::Color| -> ratatui::text::Text {
+                if original
+                    .split('\n')
+                    .any(|l| l.trim_end_matches('\r').trim() == "---")
+                {
+                    let divider = if inner_w > 0 {
+                        "─".repeat(inner_w)
                     } else {
-                        lines.push(ratatui::text::Line::from(clean.to_string()));
+                        "---".to_string()
+                    };
+                    let mut lines = Vec::new();
+                    for line in original.split('\n') {
+                        let clean = line.trim_end_matches('\r');
+                        if clean.trim() == "---" {
+                            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                                divider.clone(),
+                                Style::default().fg(color),
+                            )));
+                        } else {
+                            lines.push(ratatui::text::Line::from(clean.to_string()));
+                        }
                     }
+                    ratatui::text::Text::from(lines)
+                } else {
+                    ratatui::text::Text::from(original.to_string())
                 }
-                ratatui::text::Text::from(lines)
-            } else {
-                ratatui::text::Text::from(original.to_string())
-            }
-        };
+            };
 
         if !use_braille_border {
             let inner_w = node_rect.width.saturating_sub(2) as usize;
             let text_content = get_text_with_divider(node.text(), inner_w, border_color);
-            
+
             let text = Paragraph::new(text_content)
                 .block(block)
                 .style(Style::default().fg(theme.text))
@@ -751,7 +819,8 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                 text_rect.height.saturating_sub(y_offset as u16),
             );
 
-            let text_content = get_text_with_divider(node.text(), text_rect.width as usize, border_color);
+            let text_content =
+                get_text_with_divider(node.text(), text_rect.width as usize, border_color);
 
             let text = Paragraph::new(text_content)
                 .alignment(ratatui::layout::Alignment::Center)
@@ -778,8 +847,7 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                     let dot_y = ((y - cell_y as f64) * 4.0) as u16;
                     let buf = frame.buffer_mut();
                     if let Some(cell) = buf.cell_mut((cell_x, cell_y)) {
-                        let mut braille_char =
-                            cell.symbol().chars().next().unwrap_or('\u{2800}');
+                        let mut braille_char = cell.symbol().chars().next().unwrap_or('\u{2800}');
                         if !('\u{2800}'..='\u{28FF}').contains(&braille_char) {
                             braille_char = '\u{2800}';
                         }
@@ -879,7 +947,14 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                     } else {
                         let cx = lx + (rx - lx) / 2.0;
                         let cy = ty + (by - ty) / 2.0;
-                        trace_arc!(cx, cy, (rx - lx) / 2.0, (by - ty) / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+                        trace_arc!(
+                            cx,
+                            cy,
+                            (rx - lx) / 2.0,
+                            (by - ty) / 2.0,
+                            0.0,
+                            2.0 * std::f64::consts::PI
+                        );
                     }
                 }
                 crate::data::NodeShape::Rectangle => {
@@ -893,8 +968,22 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                     trace_line!(lx, ty + cy_h, lx, by - cy_h);
                     trace_line!(rx, ty + cy_h, rx, by - cy_h);
                     let cx = lx + (rx - lx) / 2.0;
-                    trace_arc!(cx, ty + cy_h, (rx - lx) / 2.0, cy_h, 0.0, 2.0 * std::f64::consts::PI);
-                    trace_arc!(cx, by - cy_h, (rx - lx) / 2.0, cy_h, 0.0, std::f64::consts::PI);
+                    trace_arc!(
+                        cx,
+                        ty + cy_h,
+                        (rx - lx) / 2.0,
+                        cy_h,
+                        0.0,
+                        2.0 * std::f64::consts::PI
+                    );
+                    trace_arc!(
+                        cx,
+                        by - cy_h,
+                        (rx - lx) / 2.0,
+                        cy_h,
+                        0.0,
+                        std::f64::consts::PI
+                    );
                 }
             }
         }
@@ -1021,8 +1110,10 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
 
         let buf = frame.buffer_mut();
         let mut dot = |x: f64, y: f64| {
-            if x >= canvas_area.left() as f64 && x < canvas_area.right() as f64
-                && y >= canvas_area.top() as f64 && y < canvas_area.bottom() as f64
+            if x >= canvas_area.left() as f64
+                && x < canvas_area.right() as f64
+                && y >= canvas_area.top() as f64
+                && y < canvas_area.bottom() as f64
             {
                 if let Some(cell) = buf.cell_mut((x as u16, y as u16)) {
                     cell.set_char('·').set_fg(theme.accent);
@@ -1054,7 +1145,8 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
     let mut hint_text = if state.editor_focus && state.show_editor_pane {
         "Editor Pane — Ctrl+S sync · Alt+Enter back to canvas".to_string()
     } else {
-        "? help · a menu · i edit · Ctrl+S save · Ctrl+Z undo · Alt+Enter focus · Esc/q back".to_string()
+        "? help · a menu · i edit · Ctrl+S save · Ctrl+Z undo · Alt+Enter focus · Esc/q back"
+            .to_string()
     };
     if state.connection_source_id.is_some() {
         hint_text = "CONNECTION MODE: Select target node with mouse or Enter".to_string();
@@ -1065,9 +1157,15 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
     }
 
     let mut spans = Vec::new();
-    let ext_label = if state.ext_editor_enabled { "ext:on" } else { "ext:off" };
+    let ext_label = if state.ext_editor_enabled {
+        "ext:on"
+    } else {
+        "ext:off"
+    };
     let ext_style = if state.ext_editor_enabled {
-        Style::default().fg(theme.success).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme.success)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.muted)
     };
@@ -1076,7 +1174,9 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
 
     let lock_label = if state.locked { "lock:on" } else { "lock:off" };
     let lock_style = if state.locked {
-        Style::default().fg(theme.success).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme.success)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.muted)
     };
@@ -1084,9 +1184,15 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
     spans.push(Span::raw("  "));
 
     if state.format == crate::formats::SupportedFormat::Canvas {
-        let arrow_label = if state.orthogonal_connections { "arrow:on" } else { "arrow:off" };
+        let arrow_label = if state.orthogonal_connections {
+            "arrow:on"
+        } else {
+            "arrow:off"
+        };
         let arrow_style = if state.orthogonal_connections {
-            Style::default().fg(theme.success).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.success)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.muted)
         };
@@ -1136,7 +1242,7 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                 let label_text = format!("  {}", item);
                 let shortcut = crate::helpers::get_menu_shortcut_char(menu.menu_type, item);
 
-                let is_color_picker = menu.menu_type == crate::state::PinstarMenuType::ColorPicker 
+                let is_color_picker = menu.menu_type == crate::state::PinstarMenuType::ColorPicker
                     || menu.menu_type == crate::state::PinstarMenuType::EdgeColorPicker;
 
                 if is_color_picker && item != "Default" {
@@ -1156,19 +1262,24 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                     if let Some(color) = indicator_color {
                         let display_text = " ■ ";
                         let spacer_len = 32usize
-                            .saturating_sub(label_text.chars().count() + display_text.chars().count())
+                            .saturating_sub(
+                                label_text.chars().count() + display_text.chars().count(),
+                            )
                             .max(1);
                         let spacer = " ".repeat(spacer_len);
 
                         ListItem::new(Line::from(vec![
                             Span::styled(label_text, Style::default()),
                             Span::styled(spacer, Style::default()),
-                            Span::styled(display_text, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-                        ])).style(base_style)
+                            Span::styled(
+                                display_text,
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                            ),
+                        ]))
+                        .style(base_style)
                     } else {
-                        ListItem::new(Line::from(vec![
-                            Span::styled(label_text, Style::default()),
-                        ])).style(base_style)
+                        ListItem::new(Line::from(vec![Span::styled(label_text, Style::default())]))
+                            .style(base_style)
                     }
                 } else if let Some(c) = shortcut {
                     let hint_str = format!(" [{}]", c);
@@ -1176,9 +1287,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                         .saturating_sub(label_text.chars().count() + hint_str.chars().count())
                         .max(1);
                     let spacer = " ".repeat(spacer_len);
-                    
+
                     let hint_style = if is_selected {
-                        Style::default().fg(theme.highlight_fg).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme.highlight_fg)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme.muted)
                     };
@@ -1187,11 +1300,11 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
                         Span::styled(label_text, Style::default()),
                         Span::styled(spacer, Style::default()),
                         Span::styled(hint_str, hint_style),
-                    ])).style(base_style)
+                    ]))
+                    .style(base_style)
                 } else {
-                    ListItem::new(Line::from(vec![
-                        Span::styled(label_text, Style::default()),
-                    ])).style(base_style)
+                    ListItem::new(Line::from(vec![Span::styled(label_text, Style::default())]))
+                        .style(base_style)
                 }
             })
             .collect();
@@ -1230,24 +1343,32 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let tab_bar_height = 1u16;
         let footer_height = 1u16;
         let border_height = 2u16; // top + bottom border
-        let content_height = popup_area.height.saturating_sub(tab_bar_height + footer_height + border_height);
+        let content_height = popup_area
+            .height
+            .saturating_sub(tab_bar_height + footer_height + border_height);
         let content_width = popup_area.width.saturating_sub(2); // left + right border
 
         // Tab bar
-        let tab_titles: Vec<Line> = crate::state::PinstarHelpTab::ALL.iter().map(|t| {
-            let name = t.title();
-            if *t == state.help_tab {
-                Line::from(Span::styled(
-                    format!(" {} ", name),
-                    Style::default().fg(theme.highlight_bg).bg(theme.accent).add_modifier(Modifier::BOLD),
-                ))
-            } else {
-                Line::from(Span::styled(
-                    format!(" {} ", name),
-                    Style::default().fg(theme.muted),
-                ))
-            }
-        }).collect();
+        let tab_titles: Vec<Line> = crate::state::PinstarHelpTab::ALL
+            .iter()
+            .map(|t| {
+                let name = t.title();
+                if *t == state.help_tab {
+                    Line::from(Span::styled(
+                        format!(" {} ", name),
+                        Style::default()
+                            .fg(theme.highlight_bg)
+                            .bg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                } else {
+                    Line::from(Span::styled(
+                        format!(" {} ", name),
+                        Style::default().fg(theme.muted),
+                    ))
+                }
+            })
+            .collect();
 
         let tab_bar_area = Rect::new(
             popup_area.x + 1,
@@ -1256,11 +1377,14 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             tab_bar_height,
         );
 
-        let tab_spans: Vec<Span> = tab_titles.iter().flat_map(|l| {
-            let mut s: Vec<Span> = l.spans.to_vec();
-            s.push(Span::raw(" "));
-            s
-        }).collect();
+        let tab_spans: Vec<Span> = tab_titles
+            .iter()
+            .flat_map(|l| {
+                let mut s: Vec<Span> = l.spans.to_vec();
+                s.push(Span::raw(" "));
+                s
+            })
+            .collect();
 
         let tab_bar = Paragraph::new(Line::from(tab_spans)).style(theme.bg_style());
         frame.render_widget(tab_bar, tab_bar_area);
@@ -1275,7 +1399,8 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let sep = Paragraph::new(Line::from(Span::styled(
             "─".repeat(sep_area.width as usize),
             Style::default().fg(theme.muted),
-        ))).style(theme.bg_style());
+        )))
+        .style(theme.bg_style());
         frame.render_widget(sep, sep_area);
 
         // Content area
@@ -1287,7 +1412,8 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         );
 
         let content_lines = crate::help::help_content(state.help_tab, theme, content_width);
-        let max_scroll = crate::help::help_content_height(state.help_tab).saturating_sub(content_height);
+        let max_scroll =
+            crate::help::help_content_height(state.help_tab).saturating_sub(content_height);
         state.help_scroll = state.help_scroll.min(max_scroll);
 
         let content_widget = Paragraph::new(content_lines)
@@ -1306,7 +1432,9 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
         let footer = Paragraph::new(Line::from(Span::styled(
             " Tab: switch · j/k: scroll · Esc: close ",
             Style::default().fg(theme.muted),
-        ))).style(theme.bg_style()).alignment(Alignment::Center);
+        )))
+        .style(theme.bg_style())
+        .alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
 
         // Outer block / border
@@ -1316,7 +1444,9 @@ pub fn draw_pinstar_view(frame: &mut Frame, state: &mut PinstarState, theme: &Pi
             .style(theme.bg_style())
             .title(Span::styled(
                 " Pinstar Help ",
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ));
         frame.render_widget(block, popup_area);
     }

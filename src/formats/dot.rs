@@ -1,6 +1,6 @@
-use crate::data::{CanvasData, CanvasNode, CanvasEdge, TextNode};
-use regex::Regex;
+use crate::data::{CanvasData, CanvasEdge, CanvasNode, TextNode};
 use anyhow::Result;
+use regex::Regex;
 use std::collections::HashMap;
 
 pub fn parse(content: &str) -> Result<CanvasData> {
@@ -11,12 +11,18 @@ pub fn parse(content: &str) -> Result<CanvasData> {
     let mut colors_map = HashMap::new();
     let mut orientation = crate::data::DiagramOrientation::TopDown;
 
-    let meta_re = Regex::new(r"^//\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)").unwrap();
+    let meta_re = Regex::new(
+        r"^//\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)",
+    )
+    .unwrap();
     let label_re = Regex::new(r#"label\s*=\s*"([^"]*)""#).unwrap();
     let node_decl_re = Regex::new(r#"([a-zA-Z0-9_\-]+)\s*\[([^\]]*)\]"#).unwrap();
     let edge_re = Regex::new(r#"([a-zA-Z0-9_\-]+)\s*->\s*([a-zA-Z0-9_\-]+)"#).unwrap();
     let style_re = Regex::new(r#"style\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
     let color_re = Regex::new(r#"color\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
+    let node_shape_re = Regex::new(r#"shape\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
+    let node_color_re = Regex::new(r#"color\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
+    let id_regex = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -50,7 +56,12 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         }
 
         // Skip boilerplate or whole-line comments
-        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("digraph") || trimmed.starts_with("graph") || trimmed == "}" {
+        if trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("digraph")
+            || trimmed.starts_with("graph")
+            || trimmed == "}"
+        {
             continue;
         }
 
@@ -60,7 +71,9 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 let from = caps[1].trim().to_string();
                 let to = caps[2].trim().to_string();
 
-                nodes_map.entry(from.clone()).or_insert_with(|| from.clone());
+                nodes_map
+                    .entry(from.clone())
+                    .or_insert_with(|| from.clone());
                 nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
 
                 let label = label_re.captures(trimmed).map(|c| c[1].to_string());
@@ -94,13 +107,12 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         if let Some(caps) = node_decl_re.captures(trimmed) {
             let id = caps[1].to_string();
             let attributes = &caps[2];
-            
+
             let label = if let Some(lbl_caps) = label_re.captures(attributes) {
                 lbl_caps[1].to_string()
             } else {
                 id.clone()
             };
-            let node_shape_re = Regex::new(r#"shape\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
             let shape = if let Some(scaps) = node_shape_re.captures(attributes) {
                 match &scaps[1] {
                     "diamond" => crate::data::NodeShape::Diamond,
@@ -114,7 +126,6 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             };
             shapes_map.insert(id.clone(), shape);
 
-            let node_color_re = Regex::new(r#"color\s*=\s*"?([^",\s\]]+)"?"#).unwrap();
             if let Some(ccaps) = node_color_re.captures(attributes) {
                 colors_map.insert(id.clone(), ccaps[1].to_string());
             }
@@ -124,17 +135,26 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         }
 
         // 4. Fallback standalone identifier
-        let clean_id = trimmed.trim_matches(|c| c == ';' || c == ',' || c == '{' || c == '}').trim();
-        let id_regex = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
+        let clean_id = trimmed
+            .trim_matches(|c| c == ';' || c == ',' || c == '{' || c == '}')
+            .trim();
         if id_regex.is_match(clean_id) {
-            nodes_map.entry(clean_id.to_string()).or_insert_with(|| clean_id.to_string());
+            nodes_map
+                .entry(clean_id.to_string())
+                .or_insert_with(|| clean_id.to_string());
         }
     }
 
     let mut canvas_nodes = Vec::new();
     for (id, label) in nodes_map {
-        let (x, y, w, h) = positions.get(&id).copied().unwrap_or((0.0, 0.0, 200.0, 100.0));
-        let shape = shapes_map.get(&id).copied().unwrap_or(crate::data::NodeShape::Rectangle);
+        let (x, y, w, h) = positions
+            .get(&id)
+            .copied()
+            .unwrap_or((0.0, 0.0, 200.0, 100.0));
+        let shape = shapes_map
+            .get(&id)
+            .copied()
+            .unwrap_or(crate::data::NodeShape::Rectangle);
         let color = colors_map.get(&id).cloned();
         canvas_nodes.push(CanvasNode::Text(TextNode {
             id,
@@ -171,7 +191,14 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
         for node in &data.nodes {
             let (x, y) = node.pos();
             let (w, h) = node.size();
-            buf.push_str(&format!("    // pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n", node.id(), x, y, w, h));
+            buf.push_str(&format!(
+                "    // pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n",
+                node.id(),
+                x,
+                y,
+                w,
+                h
+            ));
         }
     }
 
@@ -214,7 +241,12 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
         if attrs.is_empty() {
             buf.push_str(&format!("    {} -> {};\n", edge.from_node, edge.to_node));
         } else {
-            buf.push_str(&format!("    {} -> {} [{}];\n", edge.from_node, edge.to_node, attrs.join(", ")));
+            buf.push_str(&format!(
+                "    {} -> {} [{}];\n",
+                edge.from_node,
+                edge.to_node,
+                attrs.join(", ")
+            ));
         }
     }
 
@@ -243,8 +275,12 @@ mod tests {
         let content = "digraph G {\n    rankdir=DT;\n    A -> B;\n}";
         let data = parse(content).unwrap();
         assert_eq!(data.orientation, crate::data::DiagramOrientation::DownTop);
-        
+
         let output = serialize(&data, false).unwrap();
-        assert!(output.contains("rankdir=BT"), "DOT serialization must preserve rankdir=BT but was: {}", output);
+        assert!(
+            output.contains("rankdir=BT"),
+            "DOT serialization must preserve rankdir=BT but was: {}",
+            output
+        );
     }
 }

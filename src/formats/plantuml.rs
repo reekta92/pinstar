@@ -1,6 +1,6 @@
-use crate::data::{CanvasData, CanvasNode, CanvasEdge, TextNode};
-use regex::Regex;
+use crate::data::{CanvasData, CanvasEdge, CanvasNode, TextNode};
 use anyhow::Result;
+use regex::Regex;
 use std::collections::HashMap;
 
 pub fn parse(content: &str) -> Result<CanvasData> {
@@ -10,17 +10,26 @@ pub fn parse(content: &str) -> Result<CanvasData> {
     let mut shapes_map = HashMap::new();
     let mut orientation = crate::data::DiagramOrientation::TopDown;
 
-    let meta_re = Regex::new(r"^'\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)").unwrap();
-    
+    let meta_re = Regex::new(
+        r"^'\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)",
+    )
+    .unwrap();
+
     // Captures declarations like: object my_node, database cache
-    let decl_re = Regex::new(r"(?i)^\s*(object|class|usecase|state|node|rectangle|agent|database)\s+([a-zA-Z0-9_\-]+)").unwrap();
-    
+    let decl_re = Regex::new(
+        r"(?i)^\s*(object|class|usecase|state|node|rectangle|agent|database)\s+([a-zA-Z0-9_\-]+)",
+    )
+    .unwrap();
+
     // Captures label assignments like: my_node : "This is the text"
     let label_assign_re = Regex::new(r"^\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$").unwrap();
-    
+
     // Captures connections: A --> B or A ..> B
     let edge_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(?:-+>|\.+>)\s*([a-zA-Z0-9_\-]+)").unwrap();
-    let edge_label_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(?:-+>|\.+>)\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$").unwrap();
+    let edge_label_re =
+        Regex::new(r"([a-zA-Z0-9_\-]+)\s*(?:-+>|\.+>)\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$")
+            .unwrap();
+    let id_pattern = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -43,13 +52,16 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         if trimmed.to_lowercase().contains("left to right direction") {
             orientation = crate::data::DiagramOrientation::LeftRight;
             continue;
-        } else if trimmed.to_lowercase().contains("down to top direction") || trimmed.to_lowercase().contains("bottom to top direction") {
+        } else if trimmed.to_lowercase().contains("down to top direction")
+            || trimmed.to_lowercase().contains("bottom to top direction")
+        {
             orientation = crate::data::DiagramOrientation::DownTop;
             continue;
         }
 
         // Skip PlantUML framing markers
-        if trimmed.starts_with("@start") || trimmed.starts_with("@end") || trimmed.starts_with("'") {
+        if trimmed.starts_with("@start") || trimmed.starts_with("@end") || trimmed.starts_with("'")
+        {
             continue;
         }
 
@@ -69,9 +81,11 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 crate::data::EdgeStyle::Solid
             };
 
-            nodes_map.entry(from.clone()).or_insert_with(|| from.clone());
+            nodes_map
+                .entry(from.clone())
+                .or_insert_with(|| from.clone());
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
- 
+
             edges.push(CanvasEdge {
                 id: format!("edge_{}_{}", from, to),
                 from_node: from,
@@ -95,9 +109,11 @@ pub fn parse(content: &str) -> Result<CanvasData> {
                 crate::data::EdgeStyle::Solid
             };
 
-            nodes_map.entry(from.clone()).or_insert_with(|| from.clone());
+            nodes_map
+                .entry(from.clone())
+                .or_insert_with(|| from.clone());
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
- 
+
             edges.push(CanvasEdge {
                 id: format!("edge_{}_{}", from, to),
                 from_node: from,
@@ -140,16 +156,23 @@ pub fn parse(content: &str) -> Result<CanvasData> {
 
         // 5. Standalone Identifier
         let clean_id = trimmed.trim_matches(|c| c == ';' || c == ':').trim();
-        let id_pattern = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
         if id_pattern.is_match(clean_id) {
-            nodes_map.entry(clean_id.to_string()).or_insert_with(|| clean_id.to_string());
+            nodes_map
+                .entry(clean_id.to_string())
+                .or_insert_with(|| clean_id.to_string());
         }
     }
 
     let mut canvas_nodes = Vec::new();
     for (id, label) in nodes_map {
-        let (x, y, w, h) = positions.get(&id).copied().unwrap_or((0.0, 0.0, 200.0, 100.0));
-        let shape = shapes_map.get(&id).copied().unwrap_or(crate::data::NodeShape::Rectangle);
+        let (x, y, w, h) = positions
+            .get(&id)
+            .copied()
+            .unwrap_or((0.0, 0.0, 200.0, 100.0));
+        let shape = shapes_map
+            .get(&id)
+            .copied()
+            .unwrap_or(crate::data::NodeShape::Rectangle);
         canvas_nodes.push(CanvasNode::Text(TextNode {
             id,
             x,
@@ -184,7 +207,14 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
         for node in &data.nodes {
             let (x, y) = node.pos();
             let (w, h) = node.size();
-            buf.push_str(&format!("' pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n", node.id(), x, y, w, h));
+            buf.push_str(&format!(
+                "' pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n",
+                node.id(),
+                x,
+                y,
+                w,
+                h
+            ));
         }
     }
 
@@ -212,7 +242,10 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
         };
         if let Some(ref lbl) = edge.label {
             let escaped_lbl = lbl.replace('"', "\\\"");
-            buf.push_str(&format!("{} {} {} : \"{}\"\n", edge.from_node, arrow, edge.to_node, escaped_lbl));
+            buf.push_str(&format!(
+                "{} {} {} : \"{}\"\n",
+                edge.from_node, arrow, edge.to_node, escaped_lbl
+            ));
         } else {
             buf.push_str(&format!("{} {} {}\n", edge.from_node, arrow, edge.to_node));
         }
@@ -232,7 +265,7 @@ mod tests {
         let data = parse(content).unwrap();
         assert_eq!(data.nodes.len(), 2);
         assert_eq!(data.edges.len(), 1);
-        
+
         let output = serialize(&data, false).unwrap();
         assert!(output.contains("A --> B"));
     }

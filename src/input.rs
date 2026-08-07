@@ -48,7 +48,10 @@ pub fn handle_pinstar_mouse(
             let hit_node = state.select_node_at(mouse.column, mouse.row, canvas_area);
             if hit_node.is_some() {
                 state.open_context_menu(mouse.column, mouse.row, cx, cy);
-            } else if state.format.is_flowchart() && state.format != crate::formats::SupportedFormat::Mermaid && state.select_edge_at(cx, cy).is_some() {
+            } else if state.format.is_flowchart()
+                && state.format != crate::formats::SupportedFormat::Mermaid
+                && state.select_edge_at(cx, cy).is_some()
+            {
                 state.open_edge_context_menu(mouse.column, mouse.row);
             } else {
                 // Right-click on empty space: start selection rectangle
@@ -136,7 +139,8 @@ pub fn handle_pinstar_mouse(
             let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
 
             if state.connection_source_id.is_some() {
-                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area) {
+                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area)
+                {
                     state.finish_connection(&target_id);
                 } else {
                     state.connection_source_id = None;
@@ -145,7 +149,8 @@ pub fn handle_pinstar_mouse(
             }
 
             if state.deleting_connection_source_id.is_some() {
-                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area) {
+                if let Some(target_id) = state.select_node_at(mouse.column, mouse.row, canvas_area)
+                {
                     state.finish_delete_connection(&target_id);
                 } else {
                     state.deleting_connection_source_id = None;
@@ -229,8 +234,9 @@ pub fn handle_pinstar_mouse(
             };
 
             let hit_node = state.node_at(mouse.column, mouse.row, canvas_area);
-            let is_already_selected = hit_node.as_ref().map_or(false, |id| {
-                state.selected_node_id.as_ref() == Some(id) || state.drag_captured_nodes.contains(id)
+            let is_already_selected = hit_node.as_ref().is_some_and(|id| {
+                state.selected_node_id.as_ref() == Some(id)
+                    || state.drag_captured_nodes.contains(id)
             });
 
             if is_double_click && hit_node.is_some() {
@@ -244,7 +250,7 @@ pub fn handle_pinstar_mouse(
                     state.toggle_editor();
                 }
                 state.last_click = None;
-            } else if let Some(_) = hit_node {
+            } else if hit_node.is_some() {
                 if !is_already_selected {
                     state.drag_captured_nodes.clear();
                     let _ = state.select_node_at(mouse.column, mouse.row, canvas_area);
@@ -282,7 +288,10 @@ pub fn handle_pinstar_mouse(
                 if (start.0 - end.0).abs() > 5.0 || (start.1 - end.1).abs() > 5.0 {
                     // Significant drag: select nodes in rectangle
                     state.select_nodes_in_rect(start.0, start.1, end.0, end.1);
-                    if state.format.is_flowchart() && state.format != crate::formats::SupportedFormat::Mermaid && state.selected_edge_id.is_some() {
+                    if state.format.is_flowchart()
+                        && state.format != crate::formats::SupportedFormat::Mermaid
+                        && state.selected_edge_id.is_some()
+                    {
                         state.open_edge_context_menu(mouse.column, mouse.row);
                     }
                 } else {
@@ -339,7 +348,9 @@ pub fn handle_pinstar_mouse(
                 return true;
             }
 
-            if let Some(last_pos) = state.drag_start_pos && !state.locked {
+            if let Some(last_pos) = state.drag_start_pos
+                && !state.locked
+            {
                 let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
                 let dx = cx - last_pos.0;
                 let dy = cy - last_pos.1;
@@ -611,7 +622,10 @@ fn execute_menu_action(
             if !ids.is_empty() {
                 state.record_undo_state();
                 state.data.nodes.retain(|n| !ids.contains(n.id()));
-                state.data.edges.retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
+                state
+                    .data
+                    .edges
+                    .retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
                 state.selected_node_id = None;
                 state.drag_captured_nodes.clear();
                 let _ = state.save();
@@ -702,7 +716,8 @@ pub fn handle_pinstar_event(
             KeyCode::Char(c) => {
                 let mut found_label = None;
                 for label in &menu.items {
-                    if let Some(sc) = crate::helpers::get_menu_shortcut_char(menu.menu_type, label) {
+                    if let Some(sc) = crate::helpers::get_menu_shortcut_char(menu.menu_type, label)
+                    {
                         if sc == c.to_ascii_lowercase() {
                             found_label = Some(label.clone());
                             break;
@@ -769,8 +784,6 @@ pub fn handle_pinstar_event(
         }
     }
 
-
-
     if state.editor_focus {
         match key.code {
             KeyCode::Esc => {
@@ -813,7 +826,10 @@ pub fn handle_pinstar_event(
                 state.orthogonal_connections = !state.orthogonal_connections;
             }
         }
-        KeyCode::Char('z') | KeyCode::Char('Z') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+        KeyCode::Char('z') | KeyCode::Char('Z')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
             let _ = state.redo();
         }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -903,7 +919,10 @@ pub fn handle_pinstar_event(
         KeyCode::Char('s') if state.selected_node_id.is_some() => {
             state.start_resize();
         }
-        KeyCode::Char('p') if state.selected_node_id.is_some() && state.format != crate::formats::SupportedFormat::Canvas => {
+        KeyCode::Char('p')
+            if state.selected_node_id.is_some()
+                && state.format != crate::formats::SupportedFormat::Canvas =>
+        {
             let mut items = vec![
                 "Rectangle".to_string(),
                 "Diamond".to_string(),
@@ -924,7 +943,11 @@ pub fn handle_pinstar_event(
                 menu_type: PinstarMenuType::ShapePicker,
             });
         }
-        KeyCode::Char('o') if state.selected_node_id.is_some() && state.format != crate::formats::SupportedFormat::Mermaid && state.format != crate::formats::SupportedFormat::PlantUml => {
+        KeyCode::Char('o')
+            if state.selected_node_id.is_some()
+                && state.format != crate::formats::SupportedFormat::Mermaid
+                && state.format != crate::formats::SupportedFormat::PlantUml =>
+        {
             let items = vec![
                 "Default".to_string(),
                 "Red".to_string(),
@@ -955,7 +978,10 @@ pub fn handle_pinstar_event(
             let ids = state.all_selected_node_ids();
             if !ids.is_empty() {
                 state.data.nodes.retain(|n| !ids.contains(n.id()));
-                state.data.edges.retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
+                state
+                    .data
+                    .edges
+                    .retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
                 state.selected_node_id = None;
                 let _ = state.save();
             }

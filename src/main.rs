@@ -36,12 +36,8 @@ fn main() -> anyhow::Result<()> {
                     "graph TD\n".to_string()
                 }
             }
-            formats::SupportedFormat::Dot => {
-                "digraph G {\n}\n".to_string()
-            }
-            formats::SupportedFormat::PlantUml => {
-                "@startuml\n@enduml\n".to_string()
-            }
+            formats::SupportedFormat::Dot => "digraph G {\n}\n".to_string(),
+            formats::SupportedFormat::PlantUml => "@startuml\n@enduml\n".to_string(),
         };
         std::fs::write(&path, initial_content)?;
         let format_name = match format {
