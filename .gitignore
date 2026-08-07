@@ -6,3 +6,6 @@ test*
 *.log
 /examples/
 /graphify*
+
+# AI Sandbox and local experimental scripts
+development/
