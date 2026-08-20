@@ -5,7 +5,9 @@
 A terminal-based diagram editor for **Obsidian Canvas**, **Mermaid**, **Graphviz DOT**, and **PlantUML** files. Built with Rust and the Ratatui framework.
 
 ## Disclaimer
-`pinstar` is a sub-project of [clin-rs](https://github.com/reekta92/clin-rs). Separated for standalone use/testing.
+`pinstar` is a sub-project of [clin-rs](https://github.com/reekta92/clin-rs). Separated for standalone use/testing. The project evolves as a module inside the `clin-rs` project **for now** in the future once it's matured enough both versions will be merged and unified together so any future updates inside one or other will be available on each other. Until then the project is in semi-maintanence mode. Reported bugs or features will be looked into for implementation.
+
+**If you want to have newest features/changes about this project check out clin-rs. Note that flowchart support does not exists in clin-rs though, for now.**
 
 ## Usage
 ```bash
