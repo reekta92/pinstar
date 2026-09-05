@@ -35,7 +35,7 @@ impl MarqueeState {
     ) -> bool {
         let dx = sx_now.abs_diff(sx_start);
         let dy = sy_now.abs_diff(sy_start);
-        u32::from(dx.max(dy)) >= self.threshold_cells
+        u32::from(dx) + u32::from(dy) > self.threshold_cells
     }
 
     pub fn commit_rect(&self) -> Option<(f64, f64, f64, f64)> {
@@ -113,9 +113,13 @@ mod tests {
     }
 
     #[test]
-    fn is_dragging_screen_boundary() {
+    fn is_dragging_screen_manhattan() {
         let m = MarqueeState::new(3);
-        assert!(!m.is_dragging_screen(10, 10, 11, 12));
-        assert!(m.is_dragging_screen(10, 10, 13, 10));
+        // Manhattan move of 3 -> not dragging (strict threshold).
+        assert!(!m.is_dragging_screen(3, 0, 0, 0));
+        assert!(!m.is_dragging_screen(2, 1, 0, 0));
+        // Manhattan move of 4 -> dragging.
+        assert!(m.is_dragging_screen(4, 0, 0, 0));
+        assert!(m.is_dragging_screen(2, 2, 0, 0));
     }
 }
