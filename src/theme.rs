@@ -1,33 +1,32 @@
+//! Theme colors + color parsing + textarea helpers.
+//!
+//! `ThemeColors` is the standalone `PinstarTheme` (renamed, graf-style) with
+//! the extra style methods clin's render used on `AppThemeColors`. Hosts
+//! construct it from their own theme systems field-by-field.
+
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use ratatui_textarea::{CursorMove, TextArea};
 
 #[derive(Debug, Clone)]
-pub struct PinstarTheme {
+pub struct ThemeColors {
     pub accent: Color,
-    #[allow(dead_code)]
     pub heading: Color,
     pub success: Color,
-    #[allow(dead_code)]
     pub warning: Color,
-    #[allow(dead_code)]
     pub destructive: Color,
     pub muted: Color,
     pub text: Color,
-    #[allow(dead_code)]
     pub fg: Color,
     pub bg: Color,
-    #[allow(dead_code)]
     pub border: Color,
-    #[allow(dead_code)]
     pub tag: Color,
-    #[allow(dead_code)]
     pub folder: Color,
     pub highlight_fg: Color,
     pub highlight_bg: Color,
 }
 
-impl Default for PinstarTheme {
+impl Default for ThemeColors {
     fn default() -> Self {
         Self {
             accent: Color::Cyan,
@@ -48,9 +47,13 @@ impl Default for PinstarTheme {
     }
 }
 
-impl PinstarTheme {
+impl ThemeColors {
     pub fn bg_style(&self) -> Style {
         Style::default().bg(self.bg)
+    }
+
+    pub fn hover_style(&self) -> Style {
+        Style::default().bg(self.highlight_bg).fg(self.highlight_fg)
     }
 
     pub fn preview_bg(&self) -> Color {
@@ -69,25 +72,10 @@ impl PinstarTheme {
         Style::default().bg(self.hint_line_bg())
     }
 
-    pub fn parse_color(color_code: Option<&str>, theme: &PinstarTheme) -> Color {
+    pub fn parse_color(color_code: Option<&str>, theme: &ThemeColors) -> Color {
         match color_code {
-            Some(s) if s.starts_with('#') => {
-                if s.len() == 7 {
-                    let r = u8::from_str_radix(&s[1..3], 16).unwrap_or(0);
-                    let g = u8::from_str_radix(&s[3..5], 16).unwrap_or(0);
-                    let b = u8::from_str_radix(&s[5..7], 16).unwrap_or(0);
-                    Color::Rgb(r, g, b)
-                } else {
-                    theme.accent
-                }
-            }
-            Some("1") | Some("red") => Color::Rgb(255, 82, 82),
-            Some("2") | Some("orange") => Color::Rgb(255, 152, 0),
-            Some("3") | Some("yellow") => Color::Rgb(255, 235, 59),
-            Some("4") | Some("green") => Color::Rgb(76, 175, 80),
-            Some("5") | Some("cyan") => Color::Rgb(0, 188, 212),
-            Some("6") | Some("purple") => Color::Rgb(156, 39, 176),
-            _ => theme.accent,
+            Some(s) if s.starts_with('#') => parse_hex_color(s).unwrap_or(theme.accent),
+            _ => get_node_color(color_code, theme),
         }
     }
 }
@@ -105,6 +93,62 @@ fn derive_color(base: Color, delta: i16) -> Option<Color> {
         other => Some(other),
     }
 }
+
+pub fn parse_hex_color(s: &str) -> Option<Color> {
+    let s = s.strip_prefix('#')?;
+    if s.len() == 6 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        return Some(Color::Rgb(r, g, b));
+    }
+    None
+}
+
+/// Resolve a node color attribute: `#rrggbb`, a 1-based palette index, a
+/// palette name, or the theme accent as fallback.
+pub fn get_node_color(color_code: Option<&str>, theme: &ThemeColors) -> Color {
+    match color_code {
+        Some(s) if s.starts_with('#') => parse_hex_color(s).unwrap_or(theme.accent),
+        Some(s) => {
+            if let Ok(idx) = s.parse::<usize>()
+                && idx >= 1
+                && idx <= crate::COLOR_PICKER_PALETTE.len()
+            {
+                return crate::COLOR_PICKER_PALETTE[idx - 1].2;
+            }
+            if let Some(entry) = crate::COLOR_PICKER_PALETTE
+                .iter()
+                .find(|e| e.0.eq_ignore_ascii_case(s))
+            {
+                entry.2
+            } else {
+                theme.accent
+            }
+        }
+        None => theme.accent,
+    }
+}
+
+pub fn get_edge_color(color: Option<&str>, selected: bool, theme: &ThemeColors) -> Color {
+    if selected {
+        return theme.accent;
+    }
+    color
+        .and_then(|c| c.strip_prefix('#').map(|_| c).or(Some(c)))
+        .and_then(parse_hex_color_full)
+        .unwrap_or(theme.muted)
+}
+
+fn parse_hex_color_full(s: &str) -> Option<Color> {
+    if s.starts_with('#') {
+        parse_hex_color(s)
+    } else {
+        None
+    }
+}
+
+// ── textarea helpers (ported from standalone helpers.rs / clin events) ──────
 
 pub fn contains_cell(rect: Rect, col: u16, row: u16) -> bool {
     rect.width > 0
@@ -138,6 +182,26 @@ pub fn move_textarea_cursor_to_mouse(
     textarea.move_cursor(CursorMove::Jump(target_row as u16, target_col as u16));
 }
 
+pub fn move_textarea_cursor_to_mouse_scrolled(
+    textarea: &mut TextArea,
+    body_inner: Rect,
+    mouse_col: u16,
+    mouse_row: u16,
+    scroll_row: usize,
+    scroll_col: usize,
+) {
+    if textarea.lines().is_empty() || body_inner.width == 0 || body_inner.height == 0 {
+        return;
+    }
+    let row = mouse_row.saturating_sub(body_inner.y) as usize + scroll_row;
+    let col = mouse_col.saturating_sub(body_inner.x) as usize + scroll_col;
+    let max_row = textarea.lines().len().saturating_sub(1);
+    let target_row = row.min(max_row);
+    let max_col = textarea.lines()[target_row].chars().count();
+    let target_col = col.min(max_col);
+    textarea.move_cursor(CursorMove::Jump(target_row as u16, target_col as u16));
+}
+
 pub fn get_textarea_scroll(textarea: &TextArea) -> (usize, usize) {
     let mut scroll_row = 0;
     let mut scroll_col = 0;
@@ -161,7 +225,7 @@ pub fn line_number_gutter(
     cursor_row: usize,
     scroll_row: usize,
     height: u16,
-    theme: &PinstarTheme,
+    theme: &ThemeColors,
     top_padding: u16,
 ) -> Paragraph<'static> {
     let digits = line_count.max(1).to_string().len();
@@ -211,65 +275,5 @@ pub fn fill_cursor_line_bg(frame: &mut Frame, editor: &TextArea, area: Rect, bg:
         if let Some(cell) = buf.cell_mut((x, y)) {
             cell.set_bg(bg);
         }
-    }
-}
-
-pub fn get_menu_shortcut_char(
-    menu_type: crate::state::PinstarMenuType,
-    label: &str,
-) -> Option<char> {
-    use crate::state::PinstarMenuType;
-    match menu_type {
-        PinstarMenuType::Canvas => match label {
-            "Create Connection" => Some('c'),
-            "Delete Connection" => Some('d'),
-            "Rename Node" => Some('r'),
-            "Resize Node" => Some('s'),
-            "Set Shape..." => Some('p'),
-            "Set Color..." => Some('o'),
-            "Delete All Connections" => Some('b'),
-            "Delete Node" => Some('x'),
-            "Add Text Node" => Some('t'),
-            "Add Group" => Some('g'),
-            _ => None,
-        },
-        PinstarMenuType::EdgeMenu => match label {
-            "Set Color..." => Some('c'),
-            "Set Style..." => Some('s'),
-            _ => None,
-        },
-        PinstarMenuType::ShapePicker => match label {
-            "Rectangle" => Some('r'),
-            "Diamond" => Some('d'),
-            "Circle" => Some('c'),
-            "Cylinder" => Some('y'),
-            "Stadium" => Some('s'),
-            _ => None,
-        },
-        PinstarMenuType::ColorPicker | PinstarMenuType::EdgeColorPicker => match label {
-            "Default" => Some('d'),
-            "Red" => Some('r'),
-            "Green" => Some('g'),
-            "Yellow" => Some('y'),
-            "Blue" => Some('b'),
-            "Cyan" => Some('c'),
-            "Purple" => Some('p'),
-            "Orange" => Some('o'),
-            _ => None,
-        },
-        PinstarMenuType::EdgeStylePicker => match label {
-            "Solid" => Some('s'),
-            "Dashed" => Some('d'),
-            "Dotted" => Some('t'),
-            _ => None,
-        },
-        PinstarMenuType::OrientationPicker => match label {
-            "Top-Down" => Some('t'),
-            "Left-Right" => Some('l'),
-            "Right-Left" => Some('r'),
-            "Bottom-Up" => Some('b'),
-            _ => None,
-        },
-        _ => None,
     }
 }

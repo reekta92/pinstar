@@ -1,11 +1,11 @@
-use crate::helpers::PinstarTheme;
+use crate::theme::ThemeColors;
 use crate::state::PinstarHelpTab;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 pub fn help_content(
     tab: PinstarHelpTab,
-    theme: &PinstarTheme,
+    theme: &ThemeColors,
     max_width: u16,
 ) -> Vec<Line<'static>> {
     let key_style = Style::default()

@@ -194,6 +194,7 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             width: w,
             height: h,
             text: label,
+            title: None,
             color: None,
             shape,
         }));

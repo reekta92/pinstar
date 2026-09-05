@@ -48,6 +48,8 @@ pub struct TextNode {
     pub width: f64,
     pub height: f64,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub color: Option<String>,
     #[serde(default)]
     pub shape: NodeShape,
@@ -63,6 +65,8 @@ pub struct FileNode {
     pub height: f64,
     pub file: String,
     pub subpath: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub color: Option<String>,
 }
 
@@ -75,6 +79,8 @@ pub struct LinkNode {
     pub width: f64,
     pub height: f64,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub color: Option<String>,
 }
 
@@ -160,10 +166,58 @@ impl CanvasNode {
         }
     }
 
+    pub fn title(&self) -> Option<&str> {
+        match self {
+            CanvasNode::Text(n) => n.title.as_deref(),
+            CanvasNode::File(n) => n.title.as_deref(),
+            CanvasNode::Link(n) => n.title.as_deref(),
+            CanvasNode::Group(n) => n.label.as_deref(),
+        }
+    }
+
+    pub fn set_title(&mut self, title: Option<String>) {
+        match self {
+            CanvasNode::Text(n) => n.title = title,
+            CanvasNode::File(n) => n.title = title,
+            CanvasNode::Link(n) => n.title = title,
+            CanvasNode::Group(n) => n.label = title,
+        }
+    }
+
     pub fn shape(&self) -> NodeShape {
         match self {
             CanvasNode::Text(n) => n.shape,
             _ => NodeShape::Rectangle,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_canvas_json_without_orientation() {
+        // Pre-orientation canvas files keep parsing (serde default).
+        let data: CanvasData =
+            serde_json::from_str(r#"{"nodes":[],"edges":[]}"#).unwrap();
+        assert_eq!(data.orientation, DiagramOrientation::TopDown);
+    }
+
+    #[test]
+    fn parses_nodes_with_and_without_title() {
+        let data: CanvasData = serde_json::from_str(
+            r##"{"nodes":[{"type":"text","id":"a","x":0,"y":0,"width":10,"height":10,"text":"hi","title":"T","color":"#ff0000"},
+                          {"type":"file","id":"b","x":0,"y":0,"width":10,"height":10,"file":"x.png","subpath":null,"color":null}],
+               "edges":[]}"##,
+        )
+        .unwrap();
+        assert_eq!(data.nodes.len(), 2);
+        assert_eq!(data.nodes[0].title(), Some("T"));
+        assert_eq!(data.nodes[1].title(), None);
+        // Titles round-trip; absent titles stay absent.
+        let out = serde_json::to_string(&data).unwrap();
+        assert!(out.contains(r#""title":"T""#));
+        assert!(!out.contains(r#""id":"b","x":0,"y":0,"width":10,"height":10,"file":"x.png","subpath":null,"title""#));
     }
 }

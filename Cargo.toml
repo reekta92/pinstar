@@ -1,6 +1,6 @@
 [package]
 name = "pinstar"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Terminal-based canvas editor for .canvas files"
@@ -9,9 +9,17 @@ license = "GPL-3.0-only"
 repository = "https://github.com/reekta92/clin"
 homepage = "https://github.com/reekta92/clin"
 
+[lib]
+name = "pinstar"
+path = "src/lib.rs"
+
 [[bin]]
 name = "pinstar"
 path = "src/main.rs"
+
+[features]
+default = ["images"]
+images = ["dep:image", "dep:ratatui-image", "dep:lru"]
 
 [dependencies]
 ratatui = "0.30"
@@ -22,6 +30,12 @@ serde_json = "1.0"
 uuid = { version = "1.8", features = ["v4"] }
 anyhow = "1.0"
 regex = "1.10"
+lru = { version = "0.18.1", optional = true }
+image = { version = "0.25", optional = true }
+ratatui-image = { version = "11.0.6", optional = true, default-features = false, features = ["crossterm", "image-defaults"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [package.metadata.generate-rpm]
 assets = [

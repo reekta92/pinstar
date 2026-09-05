@@ -1,13 +1,14 @@
-use crate::helpers::PinstarTheme;
-use crate::input::{handle_pinstar_event, handle_pinstar_mouse};
-use crate::render::draw_pinstar_view;
-use crate::state::PinstarState;
-use crossterm::event::{self, Event};
+//! Standalone bin host: terminal lifecycle, external editor integration and
+//! the event loop. All canvas logic comes from the `pinstar` library.
+
+use pinstar::theme::ThemeColors;
+use pinstar::{PinstarState, Settings, draw_pinstar_view, handle_pinstar_event, handle_pinstar_mouse};
 use ratatui::Terminal;
 use ratatui::prelude::*;
 use std::io;
-use std::io::Write;
 use std::path::PathBuf;
+#[cfg(feature = "images")]
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 pub struct TermGuard {
@@ -16,13 +17,9 @@ pub struct TermGuard {
 
 impl TermGuard {
     pub fn new() -> anyhow::Result<Self> {
-        crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
-        crossterm::execute!(
-            stdout,
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture
-        )?;
+        crossterm::terminal::enable_raw_mode()?;
+        crossterm::execute!(stdout, crossterm::event::EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         Ok(Self { terminal })
@@ -34,23 +31,15 @@ impl TermGuard {
 
     fn suspend(&mut self) -> anyhow::Result<()> {
         crossterm::terminal::disable_raw_mode()?;
-        crossterm::execute!(
-            self.terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
-        )?;
-        self.terminal.show_cursor()?;
-        io::stdout().flush()?;
+        crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture)?;
+        crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
         Ok(())
     }
 
     fn resume(&mut self) -> anyhow::Result<()> {
+        crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
         crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(
-            self.terminal.backend_mut(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture
-        )?;
+        crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
         self.terminal.clear()?;
         Ok(())
     }
@@ -59,20 +48,43 @@ impl TermGuard {
 impl Drop for TermGuard {
     fn drop(&mut self) {
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            self.terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
-        );
+        let _ = crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture);
+        let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
-        let _ = io::stdout().flush();
     }
+}
+
+#[cfg(feature = "images")]
+struct ImageWorker {
+    rx: Receiver<anyhow::Result<pinstar::image::DecodedImage>>,
 }
 
 pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
     let mut guard = TermGuard::new()?;
     let mut state = PinstarState::load(&path)?;
-    let theme = PinstarTheme::default();
+    state.settings = Settings {
+        enable_image_nodes: cfg!(feature = "images"),
+        image_cache_size: 32,
+        rename_uses_id: true,
+    };
+    #[cfg(feature = "images")]
+    {
+        let (tx, rx) = pinstar::image::spawn_worker();
+        state.image_decode_tx = Some(tx);
+        run_loop(&mut guard, &mut state, Some(ImageWorker { rx }), &path)
+    }
+    #[cfg(not(feature = "images"))]
+    run_loop(&mut guard, &mut state, None, &path)
+}
+
+fn run_loop(
+    guard: &mut TermGuard,
+    state: &mut PinstarState,
+    #[cfg(feature = "images")] worker: Option<ImageWorker>,
+    #[cfg(not(feature = "images"))] _worker: Option<()>,
+    path: &PathBuf,
+) -> anyhow::Result<()> {
+    let theme = ThemeColors::default();
     let mut running = true;
 
     let external_editor = std::env::var("VISUAL")
@@ -80,6 +92,15 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
         .unwrap_or_else(|_| "vi".to_string());
 
     while running {
+        #[cfg(feature = "images")]
+        if let Some(worker) = &worker {
+            while let Ok(result) = worker.rx.try_recv() {
+                if let (Ok(img), Some(picker)) = (result, state.image_picker.as_ref()) {
+                    state.image_cache.install_decoded(img, picker);
+                }
+            }
+        }
+
         if state.trigger_whole_file_editor {
             state.trigger_whole_file_editor = false;
 
@@ -97,7 +118,8 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
             command.arg(&state.path);
 
             if command.spawn().is_err() {
-                // If generic x-terminal-emulator isn't present, gracefully degrade to suspended inline terminal edit
+                // If generic x-terminal-emulator isn't present, gracefully degrade
+                // to suspended inline terminal edit
                 let _ = guard.suspend();
                 let mut fallback = std::process::Command::new(program);
                 for arg in &editor_args {
@@ -112,7 +134,7 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
 
         if state.trigger_ext_editor {
             state.trigger_ext_editor = false;
-            if let Some(node_id) = &state.selected_node_id {
+            if let Some(node_id) = &state.selection.primary {
                 let node_text = state
                     .data
                     .nodes
@@ -123,7 +145,7 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
 
                 let temp_dir = std::env::temp_dir();
                 let temp_id = uuid::Uuid::new_v4().to_string();
-                let temp_file_path = temp_dir.join(format!("clin_pinstar_{}.md", temp_id));
+                let temp_file_path = temp_dir.join(format!("clin_pinstar_{temp_id}.md"));
                 std::fs::write(&temp_file_path, &node_text)?;
 
                 guard.suspend()?;
@@ -135,7 +157,7 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
                     .unwrap_or(("vi", vec![]));
 
                 let mut command = std::process::Command::new(program);
-                for arg in editor_args {
+                for arg in &editor_args {
                     command.arg(arg);
                 }
                 command.arg(&temp_file_path);
@@ -158,7 +180,7 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
             }
         }
 
-        if let Ok(metadata) = std::fs::metadata(&path) {
+        if let Ok(metadata) = std::fs::metadata(path) {
             if let Ok(modified) = metadata.modified() {
                 if modified > state.last_modified {
                     let _ = state.reload();
@@ -167,22 +189,24 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
         }
 
         guard.as_mut().draw(|frame| {
-            draw_pinstar_view(frame, &mut state, &theme);
+            let area = frame.area();
+            draw_pinstar_view(frame, state, &theme, area, state.mouse_pos);
         })?;
 
-        if event::poll(Duration::from_millis(100))? {
+        if crossterm::event::poll(Duration::from_millis(100))? {
             loop {
                 let area = guard.as_mut().size()?;
-                match event::read()? {
-                    Event::Key(key) => {
-                        handle_pinstar_event(&mut state, key, &mut running, area.into());
+                match crossterm::event::read()? {
+                    crossterm::event::Event::Key(key) => {
+                        handle_pinstar_event(state, key, &mut running, area.into());
                     }
-                    Event::Mouse(mouse) => {
-                        handle_pinstar_mouse(&mut state, mouse, area.into());
+                    crossterm::event::Event::Mouse(mouse) => {
+                        state.mouse_pos = Some((mouse.column, mouse.row));
+                        let _ = handle_pinstar_mouse(state, mouse, area.into());
                     }
                     _ => {}
                 }
-                if !event::poll(Duration::ZERO)? {
+                if !crossterm::event::poll(Duration::ZERO)? {
                     break;
                 }
             }
