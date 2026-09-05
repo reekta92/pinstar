@@ -4,7 +4,9 @@ on:
   push:
     branches: [main, master]
   pull_request:
-
 jobs:
   ci:
+    permissions:
+      contents: write
+    secrets: inherit
     uses: reekta92/.github/.github/workflows/ci.yml@main
