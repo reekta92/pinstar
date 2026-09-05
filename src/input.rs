@@ -457,7 +457,9 @@ pub fn execute_menu_action(
         }
     } else {
         match label {
-            "Add Text Node" => state.add_text_node(state.context_menu_pos.0, state.context_menu_pos.1),
+            "Add Text Node" => {
+                state.add_text_node(state.context_menu_pos.0, state.context_menu_pos.1)
+            }
             "Add Group" => state.add_group(state.context_menu_pos.0, state.context_menu_pos.1),
             "Add Image Node" => {
                 return ActionOutcome::host(PinstarAction::AddImageNode);
@@ -632,7 +634,8 @@ pub fn handle_pinstar_mouse(
                 state.right_down_screen = None;
                 state.marquee.clear();
                 state.drag_start_pos = None;
-            } else if let (Some(start), Some(end)) = (state.select_rect_start, state.select_rect_end)
+            } else if let (Some(start), Some(end)) =
+                (state.select_rect_start, state.select_rect_end)
             {
                 if (start.0 - end.0).abs() > 5.0 || (start.1 - end.1).abs() > 5.0 {
                     // Significant drag: select nodes in rectangle
@@ -915,8 +918,7 @@ pub fn handle_pinstar_mouse(
                                 editor_area.width.saturating_sub(gutter_width + 1),
                                 editor_area.height.saturating_sub(1),
                             );
-                            let (scroll_row, scroll_col) =
-                                get_textarea_scroll(&state.raw_editor);
+                            let (scroll_row, scroll_col) = get_textarea_scroll(&state.raw_editor);
                             move_textarea_cursor_to_mouse_scrolled(
                                 &mut state.raw_editor,
                                 body_inner,

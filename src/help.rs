@@ -1,5 +1,5 @@
-use crate::theme::ThemeColors;
 use crate::state::PinstarHelpTab;
+use crate::theme::ThemeColors;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 

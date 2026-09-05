@@ -395,23 +395,16 @@ impl PinstarState {
             if inside(sx, sy) || inside(ex, ey) {
                 return true;
             }
-            let intersect = |x1: f64,
-                             y1: f64,
-                             x2: f64,
-                             y2: f64,
-                             x3: f64,
-                             y3: f64,
-                             x4: f64,
-                             y4: f64|
-             -> bool {
-                let denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-                if denom.abs() < 0.0001 {
-                    return false;
-                }
-                let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
-                let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
-                (0.0..=1.0).contains(&ua) && (0.0..=1.0).contains(&ub)
-            };
+            let intersect =
+                |x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, x4: f64, y4: f64| -> bool {
+                    let denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+                    if denom.abs() < 0.0001 {
+                        return false;
+                    }
+                    let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+                    let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+                    (0.0..=1.0).contains(&ua) && (0.0..=1.0).contains(&ub)
+                };
             intersect(sx, sy, ex, ey, min_x, min_y, max_x, min_y)
                 || intersect(sx, sy, ex, ey, min_x, max_y, max_x, max_y)
                 || intersect(sx, sy, ex, ey, min_x, min_y, min_x, max_y)
@@ -471,11 +464,7 @@ impl PinstarState {
         let is_horiz = dx.abs() > dy.abs();
 
         let (ax, ay) = if is_horiz {
-            if dx > 0.0 {
-                (fx + fw, scy)
-            } else {
-                (fx, scy)
-            }
+            if dx > 0.0 { (fx + fw, scy) } else { (fx, scy) }
         } else if dy > 0.0 {
             (scx, fy + fh)
         } else {
@@ -483,11 +472,7 @@ impl PinstarState {
         };
 
         let (bx, by) = if is_horiz {
-            if dx > 0.0 {
-                (tx, tcy)
-            } else {
-                (tx + tw, tcy)
-            }
+            if dx > 0.0 { (tx, tcy) } else { (tx + tw, tcy) }
         } else if dy > 0.0 {
             (tcx, ty)
         } else {
@@ -510,7 +495,11 @@ impl PinstarState {
                 ]
             } else {
                 let mid_y = (ay + by) / 2.0;
-                vec![(ax, ay, ax, mid_y), (ax, mid_y, bx, mid_y), (bx, mid_y, bx, by)]
+                vec![
+                    (ax, ay, ax, mid_y),
+                    (ax, mid_y, bx, mid_y),
+                    (bx, mid_y, bx, by),
+                ]
             }
         } else {
             vec![(ax, ay, bx, by)]
@@ -675,9 +664,7 @@ impl PinstarState {
         if let Ok(mut data) = formats::load_from_format(&self.path, &content, self.format) {
             self.record_undo_state();
             // Force re-layout if orientation changed
-            if data.orientation != self.data.orientation
-                && self.format != SupportedFormat::Canvas
-            {
+            if data.orientation != self.data.orientation && self.format != SupportedFormat::Canvas {
                 formats::apply_hierarchical_layout(&mut data);
             }
             self.has_layout_override = content.contains("pinstar_layout:");
@@ -888,7 +875,8 @@ impl PinstarState {
         {
             self.selection.select_only(ids[i].clone());
         } else if self.selection.primary.is_none() && !self.data.nodes.is_empty() {
-            self.selection.select_only(self.data.nodes[0].id().to_string());
+            self.selection
+                .select_only(self.data.nodes[0].id().to_string());
         }
     }
 
@@ -1039,7 +1027,11 @@ impl PinstarState {
         if let Some(node_id) = node_id {
             self.record_undo_state();
             let trimmed = new_title.trim().to_string();
-            let title = if trimmed.is_empty() { None } else { Some(trimmed) };
+            let title = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
 
             for node in &mut self.data.nodes {
                 if node.id() == node_id {
@@ -1443,7 +1435,10 @@ impl PinstarState {
 mod tests {
     use super::*;
 
-    fn canvas_with(nodes: Vec<crate::data::CanvasNode>, edges: Vec<crate::data::CanvasEdge>) -> (tempfile::TempDir, PinstarState) {
+    fn canvas_with(
+        nodes: Vec<crate::data::CanvasNode>,
+        edges: Vec<crate::data::CanvasEdge>,
+    ) -> (tempfile::TempDir, PinstarState) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("c.canvas");
         let data = CanvasData {

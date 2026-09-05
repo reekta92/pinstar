@@ -171,11 +171,7 @@ mod tests {
     fn grid_dots_appear_on_empty_cells_only() {
         let p = projection(1.0, 1.0, 1.0, 1.0);
         let buf = render_grid(Rect::new(0, 0, 24, 16), true, p, 1.0);
-        let dots = buf
-            .content
-            .iter()
-            .filter(|c| c.symbol() == "·")
-            .count();
+        let dots = buf.content.iter().filter(|c| c.symbol() == "·").count();
         assert!(dots > 0, "expected grid dots");
     }
 

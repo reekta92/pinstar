@@ -85,8 +85,7 @@ pub fn atomic_write(path: &Path, content: &str) -> Result<()> {
         path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         uuid::Uuid::new_v4()
     ));
-    std::fs::write(&tmp, content)
-        .with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::write(&tmp, content).with_context(|| format!("failed to write {}", tmp.display()))?;
 
     #[cfg(unix)]
     {

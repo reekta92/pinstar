@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Clear, ListItem, List},
+    widgets::{Block, Clear, List, ListItem},
 };
 
 use crate::formats::SupportedFormat;
@@ -178,13 +178,7 @@ pub fn menu_specs(
         }
         PinstarMenuType::EdgeStylePicker => vec!["Solid", "Dashed", "Dotted"],
         PinstarMenuType::ShapePicker => {
-            let mut items = vec![
-                "Rectangle",
-                "Diamond",
-                "Circle",
-                "Cylinder",
-                "Stadium",
-            ];
+            let mut items = vec!["Rectangle", "Diamond", "Circle", "Cylinder", "Stadium"];
             if format == SupportedFormat::PlantUml {
                 items.retain(|item| *item != "Diamond" && *item != "Stadium");
             }
@@ -379,12 +373,7 @@ mod tests {
             false,
         );
         assert!(sel.iter().all(|s| s.label != "Set Shape..."));
-        let flow = menu_specs(
-            PinstarMenuType::Canvas,
-            true,
-            SupportedFormat::Dot,
-            false,
-        );
+        let flow = menu_specs(PinstarMenuType::Canvas, true, SupportedFormat::Dot, false);
         assert!(flow.iter().any(|s| s.label == "Set Shape..."));
         assert!(flow.iter().any(|s| s.label == "Set Orientation..."));
     }

@@ -73,8 +73,7 @@ pub fn draw_pinstar_view(
     frame.render_widget(canvas_block, canvas_area);
 
     let (cx1, cy1) = state.screen_to_canvas(canvas_area.left(), canvas_area.top(), canvas_area);
-    let (cx2, cy2) =
-        state.screen_to_canvas(canvas_area.right(), canvas_area.bottom(), canvas_area);
+    let (cx2, cy2) = state.screen_to_canvas(canvas_area.right(), canvas_area.bottom(), canvas_area);
     draw_canvas_grid(
         frame,
         canvas_area,
@@ -95,24 +94,88 @@ pub fn draw_pinstar_view(
 
     if state.format == SupportedFormat::Canvas {
         render_canvas_groups(
-            frame, state, theme, canvas_area, canvas_mouse_pos, origin_x, origin_y, z, vx, vy,
-            view_left, view_right, view_top, view_bottom,
+            frame,
+            state,
+            theme,
+            canvas_area,
+            canvas_mouse_pos,
+            origin_x,
+            origin_y,
+            z,
+            vx,
+            vy,
+            view_left,
+            view_right,
+            view_top,
+            view_bottom,
         );
         render_canvas_edges(
-            frame, state, theme, canvas_area, origin_x, origin_y, z, vx, vy, view_left,
-            view_right, view_top, view_bottom,
+            frame,
+            state,
+            theme,
+            canvas_area,
+            origin_x,
+            origin_y,
+            z,
+            vx,
+            vy,
+            view_left,
+            view_right,
+            view_top,
+            view_bottom,
         );
         render_canvas_nodes(
-            frame, state, theme, canvas_mouse_pos, origin_x, origin_y, z, vx, vy, view_left,
-            view_right, view_top, view_bottom,
+            frame,
+            state,
+            theme,
+            canvas_mouse_pos,
+            origin_x,
+            origin_y,
+            z,
+            vx,
+            vy,
+            view_left,
+            view_right,
+            view_top,
+            view_bottom,
         );
     } else {
-        render_flowchart_groups(frame, state, theme, canvas_area, origin_x, origin_y, z, vx, vy);
+        render_flowchart_groups(
+            frame,
+            state,
+            theme,
+            canvas_area,
+            origin_x,
+            origin_y,
+            z,
+            vx,
+            vy,
+        );
         render_flowchart_edges(frame, state, theme, canvas_area);
-        render_flowchart_nodes(frame, state, theme, canvas_area, origin_x, origin_y, z, vx, vy);
+        render_flowchart_nodes(
+            frame,
+            state,
+            theme,
+            canvas_area,
+            origin_x,
+            origin_y,
+            z,
+            vx,
+            vy,
+        );
     }
 
-    render_floating_editor(frame, state, theme, canvas_area, origin_x, origin_y, z, vx, vy);
+    render_floating_editor(
+        frame,
+        state,
+        theme,
+        canvas_area,
+        origin_x,
+        origin_y,
+        z,
+        vx,
+        vy,
+    );
 
     if state.format == SupportedFormat::Canvas {
         // Marquee overlay: drawn AFTER all nodes/edges/editor.
@@ -221,11 +284,13 @@ fn render_editor_pane_standalone(
 
     state.raw_editor.set_block(editor_block);
     state.raw_editor.set_style(theme.preview_bg_style());
-    state.raw_editor.set_cursor_line_style(if state.editor_focus {
-        Style::default().bg(theme.preview_bg())
-    } else {
-        Style::default()
-    });
+    state
+        .raw_editor
+        .set_cursor_line_style(if state.editor_focus {
+            Style::default().bg(theme.preview_bg())
+        } else {
+            Style::default()
+        });
     frame.render_widget(&state.raw_editor, editor_rect);
 
     if state.editor_focus {
@@ -392,7 +457,12 @@ fn render_canvas_groups(
     }
 }
 
-fn render_selection_corners(frame: &mut Frame, theme: &ThemeColors, node_rect: Rect, selected: bool) {
+fn render_selection_corners(
+    frame: &mut Frame,
+    theme: &ThemeColors,
+    node_rect: Rect,
+    selected: bool,
+) {
     if !selected {
         return;
     }
@@ -550,7 +620,8 @@ fn render_canvas_edges(
             continue;
         };
         let is_edge_selected = state.selected_edge_id.as_deref() == Some(edge.id.as_str());
-        let edge_color = crate::theme::get_edge_color(edge.color.as_deref(), is_edge_selected, theme);
+        let edge_color =
+            crate::theme::get_edge_color(edge.color.as_deref(), is_edge_selected, theme);
         for &(sx, sy, ex, ey) in &seg {
             let sfx = (sx - vx) * z + origin_x;
             let sfy = (sy - vy) * z + origin_y;
@@ -561,11 +632,7 @@ fn render_canvas_edges(
             let max_x = sfx.max(stx);
             let min_y = sfy.min(sty);
             let max_y = sfy.max(sty);
-            if max_x < view_left
-                || min_x > view_right
-                || max_y < view_top
-                || min_y > view_bottom
-            {
+            if max_x < view_left || min_x > view_right || max_y < view_top || min_y > view_bottom {
                 continue;
             }
             draw_braille_segment(
@@ -592,7 +659,10 @@ fn is_image_ext(path: &str) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
-    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -828,7 +898,6 @@ impl ViewState<'_> {
     }
 }
 
-
 // ── flowchart-format passes (standalone) ────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -1011,11 +1080,7 @@ fn render_flowchart_edges(
             let is_horizontal_exit = dx.abs() > dy.abs();
 
             let (ax, ay) = if is_horizontal_exit {
-                if dx > 0.0 {
-                    (fx + fw, scy)
-                } else {
-                    (fx, scy)
-                }
+                if dx > 0.0 { (fx + fw, scy) } else { (fx, scy) }
             } else if dy > 0.0 {
                 (scx, fy + fh)
             } else {
@@ -1023,11 +1088,7 @@ fn render_flowchart_edges(
             };
 
             let (bx, by) = if is_horizontal_exit {
-                if dx > 0.0 {
-                    (tx, tcy)
-                } else {
-                    (tx + tw, tcy)
-                }
+                if dx > 0.0 { (tx, tcy) } else { (tx + tw, tcy) }
             } else if dy > 0.0 {
                 (tcx, ty)
             } else {
@@ -1440,7 +1501,15 @@ fn render_flowchart_nodes(
         }
 
         if use_braille_border {
-            trace_node_shape(frame, state, theme, node, node_rect, canvas_area, border_color);
+            trace_node_shape(
+                frame,
+                state,
+                theme,
+                node,
+                node_rect,
+                canvas_area,
+                border_color,
+            );
         }
 
         if !node_title.is_empty() && node_rect.y > canvas_area.top() {
@@ -1608,8 +1677,22 @@ fn trace_node_shape(
             trace_line!(lx, ty + cy_h, lx, by - cy_h);
             trace_line!(rx, ty + cy_h, rx, by - cy_h);
             let cx = lx + (rx - lx) / 2.0;
-            trace_arc!(cx, ty + cy_h, (rx - lx) / 2.0, cy_h, 0.0, 2.0 * std::f64::consts::PI);
-            trace_arc!(cx, by - cy_h, (rx - lx) / 2.0, cy_h, 0.0, std::f64::consts::PI);
+            trace_arc!(
+                cx,
+                ty + cy_h,
+                (rx - lx) / 2.0,
+                cy_h,
+                0.0,
+                2.0 * std::f64::consts::PI
+            );
+            trace_arc!(
+                cx,
+                by - cy_h,
+                (rx - lx) / 2.0,
+                cy_h,
+                0.0,
+                std::f64::consts::PI
+            );
         }
     }
 }
@@ -1767,7 +1850,9 @@ fn render_edge_list_overlay(
                     .add_modifier(Modifier::BOLD),
             )];
             match &r.from_title {
-                Some(title) => spans.push(Span::styled(title.clone(), Style::default().fg(edge_color))),
+                Some(title) => {
+                    spans.push(Span::styled(title.clone(), Style::default().fg(edge_color)))
+                }
                 None => spans.push(Span::styled(
                     no_title.clone(),
                     Style::default().fg(muted_edge_color(edge_color)),
@@ -1775,7 +1860,9 @@ fn render_edge_list_overlay(
             }
             spans.push(Span::styled(" → ", Style::default().fg(theme.muted)));
             match &r.to_title {
-                Some(title) => spans.push(Span::styled(title.clone(), Style::default().fg(edge_color))),
+                Some(title) => {
+                    spans.push(Span::styled(title.clone(), Style::default().fg(edge_color)))
+                }
                 None => spans.push(Span::styled(
                     no_title.clone(),
                     Style::default().fg(muted_edge_color(edge_color)),
@@ -1977,9 +2064,7 @@ fn render_rename_popup(
                 )),
         );
 
-        state.rename_popup_rect = Some(Block::default()
-            .borders(Borders::ALL)
-            .inner(popup_area));
+        state.rename_popup_rect = Some(Block::default().borders(Borders::ALL).inner(popup_area));
         frame.render_widget(&*textarea, popup_area);
     }
 }
@@ -2017,7 +2102,10 @@ fn render_help_overlay(
                         .add_modifier(Modifier::BOLD),
                 ))
             } else {
-                Line::from(Span::styled(format!(" {name} "), Style::default().fg(theme.muted)))
+                Line::from(Span::styled(
+                    format!(" {name} "),
+                    Style::default().fg(theme.muted),
+                ))
             }
         })
         .collect();

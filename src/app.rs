@@ -2,7 +2,9 @@
 //! the event loop. All canvas logic comes from the `pinstar` library.
 
 use pinstar::theme::ThemeColors;
-use pinstar::{PinstarState, Settings, draw_pinstar_view, handle_pinstar_event, handle_pinstar_mouse};
+use pinstar::{
+    PinstarState, Settings, draw_pinstar_view, handle_pinstar_event, handle_pinstar_mouse,
+};
 use ratatui::Terminal;
 use ratatui::prelude::*;
 use std::io;

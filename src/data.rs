@@ -199,8 +199,7 @@ mod tests {
     #[test]
     fn parses_canvas_json_without_orientation() {
         // Pre-orientation canvas files keep parsing (serde default).
-        let data: CanvasData =
-            serde_json::from_str(r#"{"nodes":[],"edges":[]}"#).unwrap();
+        let data: CanvasData = serde_json::from_str(r#"{"nodes":[],"edges":[]}"#).unwrap();
         assert_eq!(data.orientation, DiagramOrientation::TopDown);
     }
 
@@ -218,6 +217,8 @@ mod tests {
         // Titles round-trip; absent titles stay absent.
         let out = serde_json::to_string(&data).unwrap();
         assert!(out.contains(r#""title":"T""#));
-        assert!(!out.contains(r#""id":"b","x":0,"y":0,"width":10,"height":10,"file":"x.png","subpath":null,"title""#));
+        assert!(!out.contains(
+            r#""id":"b","x":0,"y":0,"width":10,"height":10,"file":"x.png","subpath":null,"title""#
+        ));
     }
 }
