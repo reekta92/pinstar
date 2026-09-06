@@ -9,4 +9,12 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "Unlicense",
     "LGPL-2.1-or-later",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "NCSA",
+]
+
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0436",
 ]
