@@ -1357,7 +1357,13 @@ mod tests {
         state.settings.enable_image_nodes = true;
 
         state.open_context_menu(4, 5, 10.0, 10.0);
-        execute_menu_action(&mut state, "Add Image Node", crate::menu::PinstarMenuType::Canvas, 4, 5);
+        execute_menu_action(
+            &mut state,
+            "Add Image Node",
+            crate::menu::PinstarMenuType::Canvas,
+            4,
+            5,
+        );
 
         assert!(state.trigger_image_picker);
     }

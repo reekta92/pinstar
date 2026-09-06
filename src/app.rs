@@ -107,9 +107,11 @@ fn pick_image_file() -> Option<PathBuf> {
         let raw = input.trim();
         let path = raw.strip_prefix("~/").map_or_else(
             || PathBuf::from(raw),
-            |rest| std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(rest))
-                .unwrap_or_else(|_| PathBuf::from(raw)),
+            |rest| {
+                std::env::var("HOME")
+                    .map(|h| PathBuf::from(h).join(rest))
+                    .unwrap_or_else(|_| PathBuf::from(raw))
+            },
         );
         if !raw.is_empty() && path.exists() {
             return Some(path);
