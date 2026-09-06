@@ -5,6 +5,16 @@ use std::path::PathBuf;
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.len() == 2 && (args[1] == "-V" || args[1] == "--version") {
+        println!("pinstar {}", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
+    if args.len() == 2 && (args[1] == "-h" || args[1] == "--help") {
+        println!("Usage: pinstar <FILE>.canvas|.md|.dot|.puml");
+        std::process::exit(0);
+    }
+
     if args.len() != 2 {
         eprintln!("Usage: pinstar <FILE>.canvas|.md|.dot|.puml");
         std::process::exit(1);
