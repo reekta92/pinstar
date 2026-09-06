@@ -51,7 +51,11 @@ impl MarqueeState {
 }
 
 /// Marquee fill color shared by hosts. Matches `graf`'s muting logic exactly.
-pub fn muted_canvas_selection_fill(selection_indicator: Option<Color>, accent: Color, highlight_bg: Color) -> Color {
+pub fn muted_canvas_selection_fill(
+    selection_indicator: Option<Color>,
+    accent: Color,
+    highlight_bg: Color,
+) -> Color {
     let base = selection_indicator.unwrap_or(Color::Reset);
     match base {
         Color::Rgb(r, g, b) => Color::Rgb(r / 4, g / 4, b / 4),

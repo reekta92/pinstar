@@ -194,7 +194,11 @@ pub fn draw_pinstar_view(
                 .min(canvas_area.bottom() as f64)) as u16;
             let width = ((max_x - min_x).max(1.0)) as u16;
             let height = ((max_y - min_y).max(1.0)) as u16;
-            let fill = muted_canvas_selection_fill(theme.selection_indicator, theme.accent, theme.highlight_bg);
+            let fill = muted_canvas_selection_fill(
+                theme.selection_indicator,
+                theme.accent,
+                theme.highlight_bg,
+            );
             let screen_rect = Rect::new(left, top, width, height);
             draw_canvas_rect_filled(frame, screen_rect, fill);
         }
