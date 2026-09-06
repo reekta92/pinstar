@@ -461,9 +461,7 @@ pub fn execute_menu_action(
                 state.add_text_node(state.context_menu_pos.0, state.context_menu_pos.1)
             }
             "Add Group" => state.add_group(state.context_menu_pos.0, state.context_menu_pos.1),
-            "Add Image Node" => {
-                return ActionOutcome::host(PinstarAction::AddImageNode);
-            }
+            "Add Image Node" => state.trigger_image_picker = true,
             _ => {}
         }
     }
@@ -1344,4 +1342,23 @@ pub fn handle_pinstar_event(
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_node_menu_item_sets_picker_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.canvas");
+        std::fs::write(&path, r#"{"nodes":[],"edges":[]}"#).unwrap();
+        let mut state = crate::state::PinstarState::load(&path).unwrap();
+        state.settings.enable_image_nodes = true;
+
+        state.open_context_menu(4, 5, 10.0, 10.0);
+        execute_menu_action(&mut state, "Add Image Node", crate::menu::PinstarMenuType::Canvas, 4, 5);
+
+        assert!(state.trigger_image_picker);
+    }
 }

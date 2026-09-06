@@ -73,10 +73,49 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
     {
         let (tx, rx) = pinstar::image::spawn_worker();
         state.image_decode_tx = Some(tx);
+        state.image_picker = ratatui_image::picker::Picker::from_query_stdio().ok();
         run_loop(&mut guard, &mut state, Some(ImageWorker { rx }), &path)
     }
     #[cfg(not(feature = "images"))]
     run_loop(&mut guard, &mut state, None, &path)
+}
+
+/// Native OS file picker: zenity → kdialog → yad, stdin prompt fallback.
+/// Returns None when cancelled.
+fn pick_image_file() -> Option<PathBuf> {
+    for (program, args) in [
+        ("zenity", vec!["--file-selection", "--title=Add Image Node"]),
+        ("kdialog", vec!["--getopenfilename", "."]),
+        ("yad", vec!["--file-selection"]),
+    ] {
+        if let Ok(out) = std::process::Command::new(program).args(&args).output() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if out.status.success() && !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+            // ponytail: dialog exit-failure (e.g. no DISPLAY) is treated as
+            // cancel; stdin fallback only when no dialog binary exists.
+            return None;
+        }
+    }
+    // No dialog tool on PATH: fall back to a stdin prompt.
+    print!("Image path: ");
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_ok() {
+        let raw = input.trim();
+        let path = raw.strip_prefix("~/").map_or_else(
+            || PathBuf::from(raw),
+            |rest| std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(rest))
+                .unwrap_or_else(|_| PathBuf::from(raw)),
+        );
+        if !raw.is_empty() && path.exists() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn run_loop(
@@ -179,6 +218,17 @@ fn run_loop(
                     let _ = state.save();
                 }
                 let _ = std::fs::remove_file(&temp_file_path);
+            }
+        }
+
+        if state.trigger_image_picker {
+            state.trigger_image_picker = false;
+            let pos = state.context_menu_pos;
+            let _ = guard.suspend();
+            let picked = pick_image_file();
+            let _ = guard.resume();
+            if let Some(path) = picked {
+                state.add_image_node_with(path, pos.0, pos.1);
             }
         }
 
