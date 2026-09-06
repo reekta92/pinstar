@@ -144,3 +144,7 @@ Requires Rust toolchain (MSRV 1.85).
 ```bash
 cargo build --release
 ```
+
+## Library Usage
+
+pinstar can be embedded as a library in other Rust projects (e.g. [clin-rs](https://github.com/reekta92/clin-rs)). See **[API.md](API.md)** for the full integration guide covering state management, input handling, rendering, data model, and format support.
