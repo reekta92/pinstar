@@ -50,16 +50,21 @@ impl MarqueeState {
     }
 }
 
-/// Marquee fill color shared by hosts.
-pub fn muted_canvas_selection_fill(accent: Color, highlight_bg: Color) -> Color {
-    match accent {
-        Color::Cyan => Color::Rgb(0, 68, 68),
-        Color::Green => Color::Rgb(0, 68, 34),
-        Color::Yellow => Color::Rgb(68, 68, 0),
-        Color::Magenta => Color::Rgb(68, 0, 68),
-        Color::Red => Color::Rgb(68, 0, 0),
-        Color::Blue => Color::Rgb(0, 0, 68),
-        _ => highlight_bg,
+/// Marquee fill color shared by hosts. Matches `graf`'s muting logic exactly.
+pub fn muted_canvas_selection_fill(selection_indicator: Option<Color>, accent: Color, highlight_bg: Color) -> Color {
+    let base = selection_indicator.unwrap_or(Color::Reset);
+    match base {
+        Color::Rgb(r, g, b) => Color::Rgb(r / 4, g / 4, b / 4),
+        Color::Reset => Color::DarkGray,
+        _ => match accent {
+            Color::Cyan => Color::Rgb(0, 68, 68),
+            Color::Green => Color::Rgb(0, 68, 34),
+            Color::Yellow => Color::Rgb(68, 68, 0),
+            Color::Magenta => Color::Rgb(68, 0, 68),
+            Color::Red => Color::Rgb(68, 0, 0),
+            Color::Blue => Color::Rgb(0, 0, 68),
+            _ => highlight_bg,
+        },
     }
 }
 

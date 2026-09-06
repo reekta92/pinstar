@@ -24,6 +24,7 @@ pub struct ThemeColors {
     pub folder: Color,
     pub highlight_fg: Color,
     pub highlight_bg: Color,
+    pub selection_indicator: Option<Color>,
 }
 
 impl Default for ThemeColors {
@@ -43,6 +44,7 @@ impl Default for ThemeColors {
             folder: Color::Blue,
             highlight_fg: Color::Black,
             highlight_bg: Color::Cyan,
+            selection_indicator: None,
         }
     }
 }
