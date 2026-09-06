@@ -48,6 +48,8 @@ pub struct Settings {
     pub image_cache_size: usize,
     /// Rename popup renames the node id (standalone) instead of its title.
     pub rename_uses_id: bool,
+    /// Render internal hint bar at the bottom. Disable if host provides its own hints.
+    pub show_hints: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +58,7 @@ impl Default for Settings {
             enable_image_nodes: false,
             image_cache_size: 32,
             rename_uses_id: false,
+            show_hints: true,
         }
     }
 }

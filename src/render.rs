@@ -24,7 +24,9 @@ pub fn draw_pinstar_view(
 ) {
     let total_area = area;
     let mut area = area;
-    area.height = area.height.saturating_sub(1);
+    if state.settings.show_hints {
+        area.height = area.height.saturating_sub(1);
+    }
 
     let canvas_mouse_pos = if state.context_menu.is_some() {
         None
@@ -207,8 +209,9 @@ pub fn draw_pinstar_view(
     } else if let (Some(start), Some(end)) = (state.select_rect_start, state.select_rect_end) {
         render_select_rect(frame, state, theme, canvas_area, start, end);
     }
-
-    render_hint_line(frame, state, theme, total_area);
+    if state.settings.show_hints {
+        render_hint_line(frame, state, theme, total_area);
+    }
     render_menu(frame, state, theme, area, mouse_pos);
     render_rename_popup(frame, state, theme, area);
     render_help_overlay(frame, state, theme, area);
