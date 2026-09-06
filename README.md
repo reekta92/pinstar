@@ -35,7 +35,8 @@ If the file doesn't exist, pinstar creates an empty diagram in the detected form
 - **Hierarchical Layout**: Automatic layout for Mermaid, DOT, and PlantUML with 4 orientations
 - **Undo/Redo**: Full undo/redo stack
 - **Raw Editor**: Split-pane JSON/text editor with live sync
-
+- **External Editor**: Edit node content or entire diagrams in your `$EDITOR`
+- **Image Rendering**: Terminal-native image previews for Canvas file nodes (requires Kitty/Sixel/iTerm2 support)
 ## Keybindings
 
 ### Navigation
@@ -51,8 +52,8 @@ If the file doesn't exist, pinstar creates an empty diagram in the detected form
 | Key | Action |
 |-----|--------|
 | `i` / `Enter` | Edit selected node content |
-| `r` | Rename node (ID) |
-| `s` | Resize node |
+| `r` | Rename selected node (ID) |
+| `s` | Resize selected node |
 | `a` | Open context menu |
 | `x` | Delete selected node |
 | `o` | Set node color |
@@ -62,15 +63,14 @@ If the file doesn't exist, pinstar creates an empty diagram in the detected form
 | Key | Action |
 |-----|--------|
 | `c` | Create connection from selected node |
-| `d` | Delete connection to target node |
+| `d` | Delete connection from selected node |
 | `b` | Delete all connections on selected node |
-
 ### Global
 | Key | Action |
 |-----|--------|
 | `Ctrl+S` | Save diagram |
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
+| `Ctrl+Z` | Undo last action |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo undone action |
 | `Ctrl+R` | Cycle orientation (flowchart) / Reload from disk (canvas) |
 | `Ctrl+G` | Toggle background grid |
 | `Ctrl+E` | Toggle raw editor pane |
@@ -117,7 +117,6 @@ Default · Red · Orange · Yellow · Green · Cyan · Blue · Purple · Magenta
 
 ## Known Issues / Compatibility
 - Node titles may not be preserved when editing Obsidian Canvas files (Obsidian uses a different title format)
-- No image rendering — images display as simple nodes
 - Diamond and Stadium shapes not available in PlantUML
 - Color editing not available in Mermaid or PlantUML syntaxes
 - Groups only supported in Canvas format

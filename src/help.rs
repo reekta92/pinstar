@@ -320,10 +320,6 @@ pub fn help_content(
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("  • ", note_style),
-                Span::styled("No image rendering in terminal", desc_style),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  • ", note_style),
                 Span::styled(
                     "Node titles may not be preserved across all formats",
                     desc_style,
