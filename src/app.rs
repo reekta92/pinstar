@@ -68,6 +68,7 @@ pub fn run_pinstar(path: PathBuf) -> anyhow::Result<()> {
         enable_image_nodes: cfg!(feature = "images"),
         image_cache_size: 32,
         rename_uses_id: true,
+        show_hints: true,
     };
     #[cfg(feature = "images")]
     {
