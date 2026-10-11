@@ -16,6 +16,40 @@ The `images` feature enables image-node support (`pinstar::image` module,
 `ratatui-image`, `lru`). Omit it for a lighter build if your host doesn't need
 inline images.
 
+## Read-only Mermaid previews
+
+Enable `mermaid-preview` to use `pinstar::preview::render_mermaid(source, columns)`.
+It returns styled Ratatui `Line` rows and explicit substitution notices, or an
+error. Hosts should retain fenced source with a diagnostic on errors. Pass only
+the code-block literal, not its Markdown fences. The host owns source positions,
+caching, theming defaults and scroll synchronization.
+
+Parsing uses the pinned native `merman-core` 0.6.0 grammar/semantic model (MIT /
+Apache-2.0); no JavaScript runtime or browser is required. This optional feature
+requires Rust 1.88 or newer, matching Ratatui 0.30's effective compiler floor.
+The interactive `.canvas` model, parser, serializer and editing behavior are
+unchanged. Unknown or newer syntax is rejected rather than partially rendered.
+
+Terminal output preserves nodes, connections, edge labels and markers, nested
+subgraphs and directions, titles, accessibility text, classes and basic colors /
+text modifiers. Cycles and parallel edges are supported. Labels containing HTML
+become safe text; Markdown formatting may remain textual. Specialized shapes use
+labelled compact outlines. Curves/link lengths use orthogonal routing, animations
+are static, and unsupported CSS/configuration is reported. Icons/images are text
+placeholders; remote assets are never fetched. Links/tooltips are text, callbacks
+never execute. This is syntax-aware terminal approximation, not browser/SVG parity.
+
+Limits: 64 KiB source, 128 nodes, 256 edges, 32 groups, 16 nesting levels, 240
+columns and 512 diagram rows. Before native parsing, chart-body budgets cap raw `&` characters at 32,
+opening delimiters (`[`, `(`, `{`) at 256, and `subgraph` words at 32.
+Labels, directive contents and comments also count: these conservative budgets
+cannot be bypassed by quote-state tricks. YAML frontmatter uses a non-expanding
+scanner, caps structure depth at 16, and rejects anchors/aliases before native
+loading. Literal `&`/`*` in YAML strings and block scalars remain supported. These cases return diagnostics
+with source fallback, not partial diagrams. Diagrams that cannot fit the supplied
+width return an error instead of clipping nodes or silently losing labels. Render/cache in a
+background worker for live previews; never persist decrypted note text to render.
+
 ## Architecture Overview
 
 ```

@@ -14,6 +14,33 @@ allow = [
     "NCSA",
 ]
 
+# Optional merman-core grammar/HTML stack. Scope permissions to reviewed
+# dependencies instead of widening the global license policy. MPL-2.0 §3.3
+# permits GPL secondary licensing; these sources have no Exhibit B opt-out.
+[[licenses.exceptions]]
+name = "cssparser"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "cssparser-macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "dtoa-short"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "selectors"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "json5"
+allow = ["ISC"]
+
+[[licenses.exceptions]]
+name = "tiny-keccak"
+allow = ["CC0-1.0"]
+
 [advisories]
 ignore = [
     "RUSTSEC-2024-0436",
