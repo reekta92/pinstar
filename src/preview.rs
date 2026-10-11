@@ -22,7 +22,8 @@ const MAX_NODES: usize = 128;
 const MAX_EDGES: usize = 256;
 const MAX_GROUPS: usize = 32;
 const MAX_DEPTH: usize = 16;
-const MAX_GROUP_SEPARATORS: usize = 32;
+const MAX_AMPERSANDS: usize = 32;
+const MAX_OPENERS: usize = 256;
 const MAX_ROWS: u16 = 512;
 const MAX_COLS: u16 = 240;
 
@@ -259,118 +260,95 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
 }
 
 // The semantic parser expands grouped links before returning its model. This
-// lexical resource preflight is not a replacement grammar: it bounds expansion,
-// nested data and subgraphs before allocation, ignoring quoted/shape label text.
+// preflight is not a replacement grammar. Raw-marker budgets are conservative:
+// labels/comments also count, so quote-state tricks cannot hide parser work.
 fn validate_source_complexity(source: &str) -> Result<()> {
     static FRONTMATTER: OnceLock<Regex> = OnceLock::new();
-    let header = FRONTMATTER
-        .get_or_init(|| {
-            Regex::new(r"\A[\s\u{feff}]*---[ \t]*\r?\n(?s:.*?)\r?\n[ \t]*---[ \t]*(?:\r?\n|\z)")
-                .expect("Mermaid frontmatter")
-        })
-        .find(source)
-        .map(|matched| matched.end());
-    let start = source.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
-    if start
-        .lines()
-        .next()
-        .is_some_and(|line| line.trim() == "---")
-    {
-        ensure!(header.is_some(), "Unterminated Mermaid frontmatter");
-    }
-    let mut chars = source.char_indices().peekable();
-    let mut quote = None;
-    let mut scopes = Vec::new();
-    let mut separators = 0;
-    let mut groups = 0;
-    let mut word = String::new();
-    let mut first_word = true;
-    while let Some((index, ch)) = chars.next() {
-        if let Some(delimiter) = quote {
-            if ch == '\\' {
-                chars.next();
-            } else if ch == delimiter {
-                quote = None;
-            }
-            continue;
-        }
-        let in_header = header.is_some_and(|end| index < end);
-        if matches!(ch, '\'' | '"' | '`') || (ch == '|' && !in_header) {
-            finish_word(&mut word, &mut first_word, &mut groups)?;
-            quote = Some(ch);
-            continue;
-        }
-        if in_header && matches!(ch, '&' | '*') {
-            anyhow::bail!(
-                "YAML aliases/anchors are disabled in bounded previews; quote literal '&' or '*' in configuration"
-            );
-        }
-        if ch == '%' && chars.peek().is_some_and(|(_, next)| *next == '%') {
-            chars.next();
-            if !chars.peek().is_some_and(|(_, next)| *next == '{') {
-                finish_word(&mut word, &mut first_word, &mut groups)?;
-                for (_, next) in chars.by_ref() {
-                    if next == '\n' {
-                        break;
-                    }
-                }
-                first_word = true;
-                continue;
-            }
-        }
-        if matches!(ch, '[' | '(' | '{') {
-            finish_word(&mut word, &mut first_word, &mut groups)?;
-            scopes.push(ch);
-            ensure!(
-                scopes.len() <= MAX_DEPTH,
-                "Mermaid data nesting exceeds 16-level parser budget"
-            );
-        } else if matches!(ch, ']' | ')' | '}') {
-            let opening = match ch {
-                ']' => '[',
-                ')' => '(',
-                _ => '{',
-            };
-            if let Some(position) = scopes.iter().rposition(|scope| *scope == opening) {
-                scopes.truncate(position);
-            }
-        } else if scopes.is_empty() && !in_header {
-            if ch == '&' {
-                separators += 1;
-                ensure!(
-                    separators <= MAX_GROUP_SEPARATORS,
-                    "Mermaid grouped-link syntax exceeds 32-separator parser budget; use individual links"
-                );
-            }
-            if ch.is_alphanumeric() || ch == '_' {
-                // Only the eight-character keyword matters; cap token storage.
-                if word.len() <= 8 {
-                    word.push(ch);
-                }
-            } else {
-                finish_word(&mut word, &mut first_word, &mut groups)?;
-                if matches!(ch, '\n' | ';') {
-                    first_word = true;
-                } else if !ch.is_whitespace() {
-                    first_word = false;
-                }
-            }
-        }
-    }
-    finish_word(&mut word, &mut first_word, &mut groups)
+    static GROUP: OnceLock<Regex> = OnceLock::new();
+    // Match the pinned parser's CR normalization and frontmatter extraction.
+    let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let source = normalized.trim_start();
+    let body = if source.starts_with("---") {
+        let captures = FRONTMATTER
+            .get_or_init(|| {
+                Regex::new(r"(?s)^-{3}\s*[\n\r](.*?)[\n\r]-{3}\s*[\n\r]+")
+                    .expect("Mermaid frontmatter")
+            })
+            .captures(source)
+            .ok_or_else(|| anyhow::anyhow!("Unterminated Mermaid frontmatter"))?;
+        validate_yaml_configuration(captures.get(1).expect("YAML capture").as_str())?;
+        &source[captures.get(0).expect("frontmatter capture").end()..]
+    } else {
+        source
+    };
+    ensure!(
+        body.chars().filter(|ch| *ch == '&').count() <= MAX_AMPERSANDS,
+        "Mermaid source exceeds 32-ampersand parser budget (labels/comments also count)"
+    );
+    ensure!(
+        body.chars()
+            .filter(|ch| matches!(ch, '[' | '(' | '{'))
+            .count()
+            <= MAX_OPENERS,
+        "Mermaid source exceeds 256-opening-delimiter parser budget (labels/comments also count)"
+    );
+    ensure!(
+        GROUP
+            .get_or_init(|| Regex::new(r"(?i)\bsubgraph\b").expect("subgraph keyword"))
+            .find_iter(body)
+            .count()
+            <= MAX_GROUPS,
+        "Mermaid source exceeds 32-subgraph-keyword parser budget (labels/comments also count)"
+    );
+    Ok(())
 }
 
-fn finish_word(word: &mut String, first: &mut bool, groups: &mut usize) -> Result<()> {
-    if !word.is_empty() {
-        if *first && word.eq_ignore_ascii_case("subgraph") {
-            *groups += 1;
-            ensure!(
-                *groups <= MAX_GROUPS,
-                "Mermaid subgraphs exceed 32-group parser budget"
-            );
+fn validate_yaml_configuration(source: &str) -> Result<()> {
+    use yaml_rust2::scanner::{Scanner, TokenType};
+    static TAG: OnceLock<Regex> = OnceLock::new();
+    static ATTRIBUTE: OnceLock<Regex> = OnceLock::new();
+    static ENTITY: OnceLock<Regex> = OnceLock::new();
+    // The pinned parser rewrites HTML attribute quotes and encodes #word;
+    // entities before YAML loading. Scan that spelling too: raw YAML comments
+    // or quoted scalars must not hide anchors exposed by preprocessing.
+    let transformed = TAG
+        .get_or_init(|| Regex::new(r"<(\w+)([^>]*)>").expect("HTML tag"))
+        .replace_all(source, |captures: &regex::Captures| {
+            let attributes = ATTRIBUTE
+                .get_or_init(|| Regex::new("=\"([^\"]*)\"").expect("HTML attribute"))
+                .replace_all(&captures[2], "='$1'");
+            format!("<{}{attributes}>", &captures[1])
+        });
+    let transformed = ENTITY
+        .get_or_init(|| Regex::new(r"#\w+;").expect("Mermaid entity"))
+        .replace_all(&transformed, "MERMAID_ENTITY");
+    for spelling in [source, transformed.as_ref()] {
+        let mut scanner = Scanner::new(spelling.chars());
+        let mut depth = 0_usize;
+        for token in scanner.by_ref() {
+            match token.1 {
+                TokenType::Alias(_) | TokenType::Anchor(_) => {
+                    anyhow::bail!("YAML aliases/anchors are disabled in bounded previews")
+                }
+                TokenType::BlockSequenceStart
+                | TokenType::BlockMappingStart
+                | TokenType::FlowSequenceStart
+                | TokenType::FlowMappingStart => {
+                    depth += 1;
+                    ensure!(
+                        depth <= MAX_DEPTH,
+                        "Mermaid YAML nesting exceeds 16-level parser budget"
+                    );
+                }
+                TokenType::BlockEnd | TokenType::FlowSequenceEnd | TokenType::FlowMappingEnd => {
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
         }
-        word.clear();
-        *first = false;
+        if let Some(error) = scanner.get_error() {
+            anyhow::bail!("Invalid Mermaid YAML: {error}");
+        }
     }
     Ok(())
 }
@@ -1206,14 +1184,45 @@ mod tests {
         assert!(validate_source_complexity(&source).is_err());
         let nested = format!(
             "flowchart TD\nA@{{ unused: {}0{} }}",
-            "[".repeat(100),
-            "]".repeat(100)
+            "[".repeat(300),
+            "]".repeat(300)
         );
         assert!(validate_source_complexity(&nested).is_err());
         assert!(validate_source_complexity("---\ntitle: &a [*a]\n---\nflowchart TD\nA").is_err());
         let label = "& subgraph *".repeat(100);
-        assert!(validate_source_complexity(&format!("flowchart TD\nA[\"{label}\"] --> B")).is_ok());
+        assert!(
+            validate_source_complexity(&format!("flowchart TD\nA[\"{label}\"] --> B")).is_err()
+        );
+        let hidden = format!("flowchart TD\nclassDef c font-family:broken'\n{source}");
+        assert!(validate_source_complexity(&hidden).is_err());
         assert!(validate_source_complexity("flowchart TD\nA[unfinished ( text] --> B & C").is_ok());
+    }
+
+    #[test]
+    fn yaml_alias_scan_handles_plain_quotes_blocks_and_preprocessing() {
+        for yaml in [
+            "title: foo'bar\nx: &a [*a]",
+            "title: 'x\\'\nx: &a [*a]",
+            "title: |-\n  '\nx: &a [*a]",
+            "#quot;: &a [*a]",
+            "unused: [ '<img alt=\": &a [x] #\">'\n]",
+        ] {
+            assert!(
+                validate_source_complexity(&format!("---\n{yaml}\n---\nflowchart TD\nA")).is_err(),
+                "{yaml}"
+            );
+        }
+        for yaml in [
+            "title: A&B * literal",
+            "title: 'foo\\'",
+            "title: |\n  quotes ' & *",
+            "title: \"quoted & *\"",
+        ] {
+            assert!(
+                validate_source_complexity(&format!("---\n{yaml}\n---\nflowchart TD\nA")).is_ok(),
+                "{yaml}"
+            );
+        }
     }
 
     #[test]
