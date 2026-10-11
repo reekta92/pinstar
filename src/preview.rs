@@ -22,6 +22,7 @@ const MAX_NODES: usize = 128;
 const MAX_EDGES: usize = 256;
 const MAX_GROUPS: usize = 32;
 const MAX_DEPTH: usize = 16;
+const MAX_GROUP_SEPARATORS: usize = 32;
 const MAX_ROWS: u16 = 512;
 const MAX_COLS: u16 = 240;
 
@@ -44,9 +45,17 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         "Mermaid source exceeds 64 KiB preview limit"
     );
     ensure!(columns >= 8, "Mermaid preview needs at least 8 columns");
+    validate_source_complexity(source)?;
     static ENGINE: OnceLock<Engine> = OnceLock::new();
-    let parsed = ENGINE
-        .get_or_init(Engine::default)
+    let engine = ENGINE.get_or_init(Engine::default);
+    let metadata = engine
+        .parse_metadata_sync(source, ParseOptions::strict())?
+        .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
+    ensure!(
+        metadata.diagram_type.starts_with("flowchart"),
+        "Only Mermaid flowcharts are supported in previews"
+    );
+    let parsed = engine
         .parse_diagram_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
     ensure!(
@@ -249,6 +258,123 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
     })
 }
 
+// The semantic parser expands grouped links before returning its model. This
+// lexical resource preflight is not a replacement grammar: it bounds expansion,
+// nested data and subgraphs before allocation, ignoring quoted/shape label text.
+fn validate_source_complexity(source: &str) -> Result<()> {
+    static FRONTMATTER: OnceLock<Regex> = OnceLock::new();
+    let header = FRONTMATTER
+        .get_or_init(|| {
+            Regex::new(r"\A[\s\u{feff}]*---[ \t]*\r?\n(?s:.*?)\r?\n[ \t]*---[ \t]*(?:\r?\n|\z)")
+                .expect("Mermaid frontmatter")
+        })
+        .find(source)
+        .map(|matched| matched.end());
+    let start = source.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+    if start
+        .lines()
+        .next()
+        .is_some_and(|line| line.trim() == "---")
+    {
+        ensure!(header.is_some(), "Unterminated Mermaid frontmatter");
+    }
+    let mut chars = source.char_indices().peekable();
+    let mut quote = None;
+    let mut scopes = Vec::new();
+    let mut separators = 0;
+    let mut groups = 0;
+    let mut word = String::new();
+    let mut first_word = true;
+    while let Some((index, ch)) = chars.next() {
+        if let Some(delimiter) = quote {
+            if ch == '\\' {
+                chars.next();
+            } else if ch == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        let in_header = header.is_some_and(|end| index < end);
+        if matches!(ch, '\'' | '"' | '`') || (ch == '|' && !in_header) {
+            finish_word(&mut word, &mut first_word, &mut groups)?;
+            quote = Some(ch);
+            continue;
+        }
+        if in_header && matches!(ch, '&' | '*') {
+            anyhow::bail!(
+                "YAML aliases/anchors are disabled in bounded previews; quote literal '&' or '*' in configuration"
+            );
+        }
+        if ch == '%' && chars.peek().is_some_and(|(_, next)| *next == '%') {
+            chars.next();
+            if !chars.peek().is_some_and(|(_, next)| *next == '{') {
+                finish_word(&mut word, &mut first_word, &mut groups)?;
+                for (_, next) in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                first_word = true;
+                continue;
+            }
+        }
+        if matches!(ch, '[' | '(' | '{') {
+            finish_word(&mut word, &mut first_word, &mut groups)?;
+            scopes.push(ch);
+            ensure!(
+                scopes.len() <= MAX_DEPTH,
+                "Mermaid data nesting exceeds 16-level parser budget"
+            );
+        } else if matches!(ch, ']' | ')' | '}') {
+            let opening = match ch {
+                ']' => '[',
+                ')' => '(',
+                _ => '{',
+            };
+            if let Some(position) = scopes.iter().rposition(|scope| *scope == opening) {
+                scopes.truncate(position);
+            }
+        } else if scopes.is_empty() && !in_header {
+            if ch == '&' {
+                separators += 1;
+                ensure!(
+                    separators <= MAX_GROUP_SEPARATORS,
+                    "Mermaid grouped-link syntax exceeds 32-separator parser budget; use individual links"
+                );
+            }
+            if ch.is_alphanumeric() || ch == '_' {
+                // Only the eight-character keyword matters; cap token storage.
+                if word.len() <= 8 {
+                    word.push(ch);
+                }
+            } else {
+                finish_word(&mut word, &mut first_word, &mut groups)?;
+                if matches!(ch, '\n' | ';') {
+                    first_word = true;
+                } else if !ch.is_whitespace() {
+                    first_word = false;
+                }
+            }
+        }
+    }
+    finish_word(&mut word, &mut first_word, &mut groups)
+}
+
+fn finish_word(word: &mut String, first: &mut bool, groups: &mut usize) -> Result<()> {
+    if !word.is_empty() {
+        if *first && word.eq_ignore_ascii_case("subgraph") {
+            *groups += 1;
+            ensure!(
+                *groups <= MAX_GROUPS,
+                "Mermaid subgraphs exceed 32-group parser budget"
+            );
+        }
+        word.clear();
+        *first = false;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Node(usize),
@@ -318,7 +444,8 @@ impl<'a> Renderer<'a> {
 
     fn label(&mut self, index: usize) -> String {
         let node = &self.model.nodes[index];
-        let mut label = plain_label(node.label.as_deref().unwrap_or(&node.id));
+        let raw_label = node.label.as_deref().unwrap_or(&node.id);
+        let mut label = plain_label(raw_label);
         let shape = node.layout_shape.as_deref().unwrap_or("squareRect");
         if !matches!(
             shape,
@@ -342,7 +469,10 @@ impl<'a> Renderer<'a> {
         if node.img.is_some() {
             label.push_str(" [image]");
         }
-        if node.icon.is_some() || node.img.is_some() {
+        if node.icon.is_some()
+            || node.img.is_some()
+            || raw_label.to_ascii_lowercase().contains("<img")
+        {
             self.notice("Icons and images use text placeholders; no assets are fetched");
         }
         if node
@@ -350,6 +480,7 @@ impl<'a> Renderer<'a> {
             .as_deref()
             .is_some_and(|kind| kind != "text")
             || label.contains("fa:")
+            || (raw_label.contains('<') && raw_label.contains('>'))
         {
             self.notice("HTML, Markdown and icon labels use safe text equivalents");
         }
@@ -625,8 +756,12 @@ fn plain_label(text: &str) -> String {
     let text = BREAKS
         .get_or_init(|| Regex::new(r"(?i)<br\s*/?>").expect("label breaks"))
         .replace_all(text, "\n");
+    static IMAGES: OnceLock<Regex> = OnceLock::new();
+    let text = IMAGES
+        .get_or_init(|| Regex::new(r"(?i)<img\b[^>]*>").expect("HTML image labels"))
+        .replace_all(&text, "[image]");
     let text = TAGS
-        .get_or_init(|| Regex::new(r"<[^>]*>").expect("label tags"))
+        .get_or_init(|| Regex::new(r"</?[A-Za-z][^>]*>|<!--(?s:.*?)-->").expect("label tags"))
         .replace_all(&text, "");
     static ENTITIES: OnceLock<Regex> = OnceLock::new();
     let text = ENTITIES
@@ -1052,6 +1187,36 @@ mod tests {
     }
 
     #[test]
+    fn expansion_and_nested_data_are_bounded_before_semantic_parsing() {
+        let group = (0..1000)
+            .map(|index| format!("A{index}"))
+            .collect::<Vec<_>>()
+            .join(" & ");
+        assert!(
+            render_mermaid(&format!("flowchart TD\n{group} --> {group}"), 80)
+                .unwrap_err()
+                .to_string()
+                .contains("parser budget")
+        );
+        let source = format!(
+            "flowchart TD\n{}A{}",
+            "subgraph g\n".repeat(40),
+            "\nend".repeat(40)
+        );
+        assert!(validate_source_complexity(&source).is_err());
+        let nested = format!(
+            "flowchart TD\nA@{{ unused: {}0{} }}",
+            "[".repeat(100),
+            "]".repeat(100)
+        );
+        assert!(validate_source_complexity(&nested).is_err());
+        assert!(validate_source_complexity("---\ntitle: &a [*a]\n---\nflowchart TD\nA").is_err());
+        let label = "& subgraph *".repeat(100);
+        assert!(validate_source_complexity(&format!("flowchart TD\nA[\"{label}\"] --> B")).is_ok());
+        assert!(validate_source_complexity("flowchart TD\nA[unfinished ( text] --> B & C").is_ok());
+    }
+
+    #[test]
     fn default_colors_inherit_the_host_theme() {
         let preview = render_mermaid("flowchart TD\nA-->B", 80).unwrap();
         assert!(
@@ -1126,6 +1291,11 @@ mod tests {
         assert_eq!(wrap_text("日本語", 4), ["日本", "語"]);
         assert_eq!(wrap_text("👨‍👩‍👧‍👦e\u{301}", 2), ["👨‍👩‍👧‍👦", "e\u{301}"]);
         assert_eq!(plain_label("a\tb"), "a b");
+        assert_eq!(plain_label("a < b > c"), "a < b > c");
+        assert_eq!(
+            plain_label("<img src=\"https://invalid.example/x\">"),
+            "[image]"
+        );
         assert_eq!(
             plain_label("#9829; #quot; &copy; #notanentity;"),
             "♥ \" © #notanentity;"

@@ -40,8 +40,13 @@ placeholders; remote assets are never fetched. Links/tooltips are text, callback
 never execute. This is syntax-aware terminal approximation, not browser/SVG parity.
 
 Limits: 64 KiB source, 128 nodes, 256 edges, 32 groups, 16 nesting levels, 240
-columns and 512 output rows. Diagrams that cannot fit the supplied width return
-an error instead of clipping nodes or silently losing labels. Render/cache in a
+columns and 512 diagram rows. Before native parsing, grouping syntax is capped at
+32 unquoted `&` separators, data-delimiter nesting at 16 levels, and subgraph
+declarations at 32. This bounds Cartesian link expansion before the parser
+allocates its semantic model. YAML anchors/aliases are rejected; quote literal
+`&` or `*` characters in frontmatter configuration. These cases return diagnostics
+with source fallback, not partial diagrams. Diagrams that cannot fit the supplied
+width return an error instead of clipping nodes or silently losing labels. Render/cache in a
 background worker for live previews; never persist decrypted note text to render.
 
 ## Architecture Overview
