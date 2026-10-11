@@ -15,6 +15,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
+use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 128;
@@ -616,7 +617,8 @@ fn plain_label(text: &str) -> String {
         });
     htmlize::unescape(text.as_ref())
         .chars()
-        .filter(|ch| !ch.is_control() || *ch == '\n')
+        .filter(|ch| !ch.is_control() || matches!(*ch, '\n' | '\t'))
+        .map(|ch| if ch == '\t' { ' ' } else { ch })
         .collect()
 }
 
@@ -625,13 +627,13 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     for physical in text.split('\n') {
         let mut row = String::new();
         let mut used = 0;
-        for ch in physical.chars() {
-            let cells = Span::raw(ch.to_string()).width();
+        for grapheme in physical.graphemes(true) {
+            let cells = Span::raw(grapheme).width();
             if used + cells > width && !row.is_empty() {
                 lines.push(std::mem::take(&mut row));
                 used = 0;
             }
-            row.push(ch);
+            row.push_str(grapheme);
             used += cells;
         }
         lines.push(row);
@@ -1020,6 +1022,8 @@ mod tests {
     fn labels_strip_terminal_controls_and_html() {
         assert_eq!(plain_label("<b>hello</b><br/>world\u{1b}"), "hello\nworld");
         assert_eq!(wrap_text("日本語", 4), ["日本", "語"]);
+        assert_eq!(wrap_text("👨‍👩‍👧‍👦e\u{301}", 2), ["👨‍👩‍👧‍👦", "e\u{301}"]);
+        assert_eq!(plain_label("a\tb"), "a b");
         assert_eq!(
             plain_label("#9829; #quot; &copy; #notanentity;"),
             "♥ \" © #notanentity;"
