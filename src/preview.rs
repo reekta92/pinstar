@@ -333,7 +333,7 @@ impl<'a> Renderer<'a> {
                 | "cylinder"
                 | "subroutine"
         ) {
-            label = format!("[{shape}] {label}");
+            label = format!("[{}] {label}", plain_label(shape));
             self.notice("Specialized shapes use labelled terminal outlines");
         }
         if let Some(icon) = &node.icon {
@@ -536,11 +536,22 @@ impl<'a> Renderer<'a> {
             );
         }
         if matches!(direction, "RL" | "BT") {
+            // Reverse sibling units, not their contents: a nested group's local
+            // direction must not be mirrored by the orientation of its parent.
+            let units: BTreeMap<_, _> = scene
+                .boxes
+                .iter()
+                .filter(|item| self.parents.get(&item.id).map(String::as_str) == parent)
+                .map(|item| (item.id.clone(), item.rect))
+                .collect();
             for item in &mut scene.boxes {
+                let unit = units[&self
+                    .direct_child(&item.id, parent)
+                    .expect("validated hierarchy")];
                 if horizontal {
-                    item.rect.x = scene.width - item.rect.x - item.rect.width;
+                    item.rect.x = scene.width - unit.x - unit.width + (item.rect.x - unit.x);
                 } else {
-                    item.rect.y = scene.height - item.rect.y - item.rect.height;
+                    item.rect.y = scene.height - unit.y - unit.height + (item.rect.y - unit.y);
                 }
             }
         }
@@ -1029,6 +1040,37 @@ mod tests {
                 "{shape}"
             );
         }
+    }
+
+    #[test]
+    fn reversed_parent_preserves_local_subgraph_direction() {
+        let parsed = Engine::default()
+            .parse_diagram_sync(
+                "flowchart RL\nsubgraph g[Group]\ndirection LR\nA-->B\nend\nX-->g",
+                ParseOptions::strict(),
+            )
+            .unwrap()
+            .unwrap();
+        let model: FlowchartV2Model = serde_json::from_value(parsed.model).unwrap();
+        let scene = Renderer::new(&model, 100)
+            .unwrap()
+            .container(None, "RL", 0)
+            .unwrap();
+        let bounds = |id: &str| scene.boxes.iter().find(|item| item.id == id).unwrap().rect;
+        assert!(bounds("A").x < bounds("B").x);
+        assert!(bounds("g").x < bounds("X").x);
+    }
+
+    #[test]
+    fn unknown_shape_names_cannot_inject_terminal_controls() {
+        let model: FlowchartV2Model = serde_json::from_value(serde_json::json!({
+            "nodes": [{"id": "A", "label": "Safe", "layoutShape": "bad\u{1b}[31m"}],
+            "edges": []
+        }))
+        .unwrap();
+        let label = Renderer::new(&model, 80).unwrap().label(0);
+        assert!(!label.chars().any(char::is_control));
+        assert!(label.contains("Safe"));
     }
 
     #[test]
