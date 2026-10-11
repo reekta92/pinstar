@@ -104,6 +104,7 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .iter()
         .map(|item| (item.id.as_str(), item.rect))
         .collect();
+    let mut connections = BTreeMap::new();
     for edge in &model.edges {
         let from = bounds
             .get(edge.from.as_str())
@@ -121,7 +122,15 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
             .collect();
         let style = renderer.css(&edge.classes, &properties);
         let horizontal = from.x.abs_diff(to.x) > from.y.abs_diff(to.y);
-        draw_edge(&mut buffer, *from, *to, edge, horizontal, style);
+        draw_edge(
+            &mut buffer,
+            &mut connections,
+            *from,
+            *to,
+            edge,
+            horizontal,
+            style,
+        );
         if edge.interpolate.is_some() || edge.length > 1 {
             renderer.notice("Curves and link lengths use compact orthogonal routing");
         }
@@ -861,8 +870,38 @@ fn edge_symbol(edge: &FlowEdge) -> &'static str {
     }
 }
 
+// Bits describe actual neighboring edge cells: north, east, south, west.
+// Keep edge connectivity separate from buffer glyphs (which also hold boxes).
+fn connect_edge_cell(
+    buffer: &mut Buffer,
+    connections: &mut BTreeMap<(u16, u16), u8>,
+    point: (u16, u16),
+    direction: u8,
+    stroke: Option<&str>,
+    style: Style,
+) {
+    if point.0 >= buffer.area.width || point.1 >= buffer.area.height {
+        return;
+    }
+    let mask = connections.entry(point).or_default();
+    *mask |= direction;
+    let glyphs = match stroke {
+        Some("thick") => [
+            ' ', '┃', '━', '┗', '┃', '┃', '┏', '┣', '━', '┛', '━', '┻', '┓', '┫', '┳', '╋',
+        ],
+        Some("dotted") => [
+            ' ', '┆', '┄', '└', '┆', '┆', '┌', '├', '┄', '┘', '┄', '┴', '┐', '┤', '┬', '┼',
+        ],
+        _ => [
+            ' ', '│', '─', '└', '│', '│', '┌', '├', '─', '┘', '─', '┴', '┐', '┤', '┬', '┼',
+        ],
+    };
+    put(buffer, point.0, point.1, glyphs[usize::from(*mask)], style);
+}
+
 fn draw_edge(
     buffer: &mut Buffer,
+    connections: &mut BTreeMap<(u16, u16), u8>,
     from: Rect,
     to: Rect,
     edge: &FlowEdge,
@@ -926,25 +965,47 @@ fn draw_edge(
     } else {
         [start, (start.0, middle), (end.0, middle), end]
     };
-    let (h, v) = match edge.stroke.as_deref() {
-        Some("thick") => ('━', '┃'),
-        Some("dotted") => ('┄', '┆'),
-        _ => ('─', '│'),
-    };
     for segment in path.windows(2) {
         let (a, b) = (segment[0], segment[1]);
         if a.1 == b.1 {
-            for x in a.0.min(b.0)..=a.0.max(b.0) {
-                put(buffer, x, a.1, h, style);
+            for x in a.0.min(b.0)..a.0.max(b.0) {
+                connect_edge_cell(
+                    buffer,
+                    connections,
+                    (x, a.1),
+                    2,
+                    edge.stroke.as_deref(),
+                    style,
+                );
+                connect_edge_cell(
+                    buffer,
+                    connections,
+                    (x + 1, a.1),
+                    8,
+                    edge.stroke.as_deref(),
+                    style,
+                );
             }
         } else {
-            for y in a.1.min(b.1)..=a.1.max(b.1) {
-                put(buffer, a.0, y, v, style);
+            for y in a.1.min(b.1)..a.1.max(b.1) {
+                connect_edge_cell(
+                    buffer,
+                    connections,
+                    (a.0, y),
+                    4,
+                    edge.stroke.as_deref(),
+                    style,
+                );
+                connect_edge_cell(
+                    buffer,
+                    connections,
+                    (a.0, y + 1),
+                    1,
+                    edge.stroke.as_deref(),
+                    style,
+                );
             }
         }
-    }
-    for point in &path[1..3] {
-        put(buffer, point.0, point.1, '┼', style);
     }
     let kind = edge.edge_type.as_deref().unwrap_or("arrow_point");
     let marker = if kind.contains("circle") {
@@ -1223,6 +1284,114 @@ mod tests {
                 "{yaml}"
             );
         }
+    }
+
+    #[test]
+    fn straight_edges_and_offset_corners_have_no_fake_junctions() {
+        let equal = render_mermaid("flowchart TD\nA[One]-->B[Two]", 80).unwrap();
+        let rows: Vec<_> = equal.lines.iter().map(ToString::to_string).collect();
+        assert_eq!(rows[3].trim(), "│");
+        assert_eq!(rows[4].trim(), "│");
+        assert_eq!(rows[5].trim(), "▼");
+        let chain = render_mermaid("flowchart TD\nA[Write Markdown]-->B[Open preview]\nB-->C[Read flowchart]\nC-->D[Keep source intact]", 80).unwrap();
+        let rows: Vec<_> = chain
+            .lines
+            .iter()
+            .map(|row| row.to_string().trim_end().to_owned())
+            .collect();
+        assert_eq!(rows[4], "        ┌┘");
+        assert_eq!(rows[10], "        └┐");
+        assert_eq!(rows[16], "         └─┐");
+        assert!(rows.iter().all(|row| !row.contains('┼')));
+    }
+
+    #[test]
+    fn edge_corners_follow_direction_and_stroke() {
+        let mut edge: FlowEdge = serde_json::from_value(serde_json::json!({"id":"e1", "from":"A", "to":"B", "type":"arrow_point", "length":1, "style":[], "classes":[]})).unwrap();
+        for horizontal in [false, true] {
+            let a = Rect::new(1, 1, 4, 3);
+            let b = if horizontal {
+                Rect::new(10, 7, 4, 3)
+            } else {
+                Rect::new(7, 10, 4, 3)
+            };
+            for reverse in [false, true] {
+                let (from, to) = if reverse { (b, a) } else { (a, b) };
+                for stroke in ["normal", "thick", "dotted"] {
+                    edge.stroke = Some(stroke.to_owned());
+                    let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 20));
+                    draw_edge(
+                        &mut buffer,
+                        &mut BTreeMap::new(),
+                        from,
+                        to,
+                        &edge,
+                        horizontal,
+                        Style::default(),
+                    );
+                    let (first, second) = if stroke == "thick" {
+                        ("┗", "┓")
+                    } else {
+                        ("└", "┐")
+                    };
+                    if horizontal {
+                        assert_eq!(buffer[(7, 2)].symbol(), second);
+                        assert_eq!(buffer[(7, 8)].symbol(), first);
+                        assert_eq!(
+                            buffer[if reverse { (5, 2) } else { (9, 8) }].symbol(),
+                            if reverse { "◀" } else { "▶" }
+                        );
+                    } else {
+                        assert_eq!(buffer[(3, 6)].symbol(), first);
+                        assert_eq!(buffer[(9, 6)].symbol(), second);
+                        assert_eq!(
+                            buffer[if reverse { (3, 4) } else { (9, 9) }].symbol(),
+                            if reverse { "▲" } else { "▼" }
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn actual_edge_branches_and_crossings_merge_connections() {
+        let edge: FlowEdge = serde_json::from_value(
+            serde_json::json!({"id":"e1", "from":"A", "to":"B", "length":1, "style":[], "classes":[]}),
+        )
+        .unwrap();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 20));
+        let mut connections = BTreeMap::new();
+        draw_edge(
+            &mut buffer,
+            &mut connections,
+            Rect::new(1, 1, 4, 3),
+            Rect::new(1, 10, 4, 3),
+            &edge,
+            false,
+            Style::default(),
+        );
+        draw_edge(
+            &mut buffer,
+            &mut connections,
+            Rect::new(1, 1, 4, 3),
+            Rect::new(7, 10, 4, 3),
+            &edge,
+            false,
+            Style::default(),
+        );
+        assert_eq!(buffer[(3, 6)].symbol(), "├");
+        draw_edge(
+            &mut buffer,
+            &mut connections,
+            Rect::new(5, 0, 2, 2),
+            Rect::new(5, 10, 2, 2),
+            &edge,
+            false,
+            Style::default(),
+        );
+        assert_eq!(buffer[(6, 6)].symbol(), "┼");
+        assert_eq!(connections[&(6, 6)], 15);
     }
 
     #[test]
