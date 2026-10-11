@@ -873,7 +873,16 @@ fn buffer_lines(buffer: &Buffer) -> Vec<Line<'static>> {
             let mut x = 0;
             while x < buffer.area.width {
                 let cell = &buffer[(x, y)];
-                let next = cell.style();
+                let mut next = cell.style();
+                // An off-screen buffer's reset colors mean "unspecified" for a
+                // preview host; preserve its theme instead of resetting to the
+                // terminal palette when these rows are embedded in Markdown.
+                if next.fg == Some(Color::Reset) {
+                    next.fg = None;
+                }
+                if next.bg == Some(Color::Reset) {
+                    next.bg = None;
+                }
                 if next != style && !text.is_empty() {
                     spans.push(Span::styled(std::mem::take(&mut text), style));
                 }
@@ -1040,6 +1049,18 @@ mod tests {
                 "{shape}"
             );
         }
+    }
+
+    #[test]
+    fn default_colors_inherit_the_host_theme() {
+        let preview = render_mermaid("flowchart TD\nA-->B", 80).unwrap();
+        assert!(
+            preview
+                .lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style.fg.is_none() && span.style.bg.is_none())
+        );
     }
 
     #[test]
