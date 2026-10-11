@@ -168,9 +168,9 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         {
             let text = format!(
                 "{} {} {}{}",
-                edge.from,
+                plain_label(&edge.from),
                 edge_symbol(edge),
-                edge.to,
+                plain_label(&edge.to),
                 if label.is_empty() {
                     String::new()
                 } else {
@@ -188,7 +188,7 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         if let Some(link) = &node.link {
             lines.extend(
                 wrap_text(
-                    &format!("{}: link {}", node.id, plain_label(link)),
+                    &format!("{}: link {}", plain_label(&node.id), plain_label(link)),
                     columns as usize,
                 )
                 .into_iter()
@@ -202,12 +202,31 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         if let Some(tooltip) = model.tooltips.get(&node.id) {
             lines.extend(
                 wrap_text(
-                    &format!("{}: {}", node.id, plain_label(tooltip)),
+                    &format!("{}: {}", plain_label(&node.id), plain_label(tooltip)),
                     columns as usize,
                 )
                 .into_iter()
                 .map(Line::raw),
             );
+        }
+    }
+    // Group headers have one line of space. Keep complete long/multiline titles
+    // in a legend instead of clipping semantic text or putting LF into a cell.
+    for group in &model.subgraphs {
+        let title = plain_label(&group.title);
+        if let Some(rect) = bounds.get(group.id.as_str()) {
+            if title.contains('\n')
+                || Line::raw(title.clone()).width() > usize::from(rect.width.saturating_sub(4))
+            {
+                lines.extend(
+                    wrap_text(
+                        &format!("{}: {title}", plain_label(&group.id)),
+                        usize::from(columns),
+                    )
+                    .into_iter()
+                    .map(Line::raw),
+                );
+            }
         }
     }
     for text in [&model.acc_title, &model.acc_descr].into_iter().flatten() {
@@ -686,7 +705,7 @@ fn draw_box(buffer: &mut Buffer, rect: Rect, label: &str, style: Style, shape: &
         buffer.set_stringn(
             rect.x + 2,
             rect.y,
-            label,
+            label.lines().next().unwrap_or_default(),
             rect.width.saturating_sub(4) as usize,
             style,
         );
@@ -1008,6 +1027,26 @@ mod tests {
             assert!(
                 text(&render_mermaid(&source, 80).unwrap()).contains("Content"),
                 "{shape}"
+            );
+        }
+    }
+
+    #[test]
+    fn group_titles_remain_complete_and_cells_have_no_controls() {
+        for title in ["a".repeat(200), "First<br/>Second".to_owned()] {
+            let source = format!("flowchart TD\nsubgraph g[\"{title}\"]\nA-->B\nend");
+            let preview = render_mermaid(&source, 30).unwrap();
+            let flat: String = preview.lines.iter().map(ToString::to_string).collect();
+            if title.starts_with('a') {
+                assert!(flat.contains(&title));
+            } else {
+                assert!(flat.contains("First") && flat.contains("Second"));
+            }
+            assert!(
+                preview
+                    .lines
+                    .iter()
+                    .all(|line| !line.to_string().chars().any(char::is_control))
             );
         }
     }
