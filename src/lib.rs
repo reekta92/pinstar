@@ -15,6 +15,8 @@ pub mod image;
 pub mod input;
 pub mod menu;
 pub mod overlay;
+#[cfg(feature = "mermaid-preview")]
+pub mod preview;
 pub mod render;
 pub mod selection;
 pub mod state;
