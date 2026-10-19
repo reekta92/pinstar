@@ -139,7 +139,7 @@ cargo install pinstar
 ```
 
 ## Building from Source
-Requires Rust toolchain (MSRV 1.85).
+Requires Rust toolchain (MSRV 1.90.0).
 
 ```bash
 cargo build --release
