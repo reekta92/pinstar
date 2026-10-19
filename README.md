@@ -148,3 +148,24 @@ cargo build --release
 ## Library Usage
 
 pinstar can be embedded as a library in other Rust projects (e.g. [clin-rs](https://github.com/reekta92/clin-rs)). See **[API.md](API.md)** for the full integration guide covering state management, input handling, rendering, data model, and format support.
+
+### Mermaid dependency compatibility
+
+The optional `mermaid-preview` feature stays on `merman-core 0.6.0` to support
+Rust 1.90 and the current preview API. This repository pins a compatibility fork
+that replaces archived `serde_yaml` with maintained `yaml_serde 0.10.7`.
+No advisory ignore or preview feature removal is needed.
+
+Cargo does not propagate dependency patches to consumers or published packages.
+Applications enabling `mermaid-preview` must add this to their root manifest to
+use the maintained backend:
+
+```toml
+[patch.crates-io]
+merman-core = { git = "https://github.com/reekta92/merman", rev = "ba16ce6a43a5f0d2d070bd40cf91b958fd7e22e0" }
+```
+
+Without the root patch, crates.io consumers resolve the original 0.6.0 YAML
+backend and its unmaintained dependency advisory. Retire this patch when an
+upstream release supports the maintained backend within the supported Rust
+minimum; upgrading to 0.7 or later also requires an API migration and Rust 1.95.

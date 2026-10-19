@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # 0.7+ requires Rust 1.95 and changes the preview API; migrate deliberately.
+      - dependency-name: merman-core
+        versions: [">=0.7.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
