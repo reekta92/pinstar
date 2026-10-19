@@ -224,19 +224,18 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
     // in a legend instead of clipping semantic text or putting LF into a cell.
     for group in &model.subgraphs {
         let title = plain_label(&group.title);
-        if let Some(rect) = bounds.get(group.id.as_str()) {
-            if title.contains('\n')
-                || Line::raw(title.clone()).width() > usize::from(rect.width.saturating_sub(4))
-            {
-                lines.extend(
-                    wrap_text(
-                        &format!("{}: {title}", plain_label(&group.id)),
-                        usize::from(columns),
-                    )
-                    .into_iter()
-                    .map(Line::raw),
-                );
-            }
+        if let Some(rect) = bounds.get(group.id.as_str())
+            && (title.contains('\n')
+                || Line::raw(title.clone()).width() > usize::from(rect.width.saturating_sub(4)))
+        {
+            lines.extend(
+                wrap_text(
+                    &format!("{}: {title}", plain_label(&group.id)),
+                    usize::from(columns),
+                )
+                .into_iter()
+                .map(Line::raw),
+            );
         }
     }
     for text in [&model.acc_title, &model.acc_descr].into_iter().flatten() {
@@ -498,16 +497,14 @@ impl<'a> Renderer<'a> {
             if let (Some(from), Some(to)) = (
                 self.direct_child(&edge.from, parent),
                 self.direct_child(&edge.to, parent),
-            ) {
-                if from != to
-                    && adjacency
-                        .get_mut(&from)
-                        .is_some_and(|set| set.insert(to.clone()))
-                {
-                    *indegree
-                        .get_mut(&to)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown flowchart endpoint"))? += 1;
-                }
+            ) && from != to
+                && adjacency
+                    .get_mut(&from)
+                    .is_some_and(|set| set.insert(to.clone()))
+            {
+                *indegree
+                    .get_mut(&to)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown flowchart endpoint"))? += 1;
             }
         }
         let mut ranks: BTreeMap<String, usize> = ids.iter().map(|id| (id.clone(), 0)).collect();

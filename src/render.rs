@@ -1946,13 +1946,13 @@ fn render_select_rect(
     let bot = y2 as u16;
 
     for x in left..=right {
-        if (x - left) % 3 == 0 {
+        if (x - left).is_multiple_of(3) {
             dot(x as f64, y1);
             dot(x as f64, y2);
         }
     }
     for y in top..=bot {
-        if (y - top) % 3 == 0 {
+        if (y - top).is_multiple_of(3) {
             dot(x1, y as f64);
             dot(x2, y as f64);
         }

@@ -278,10 +278,10 @@ impl PinstarState {
             .set_cursor_line_style(ratatui::style::Style::default());
         self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
 
-        if let Ok(metadata) = std::fs::metadata(&self.path) {
-            if let Ok(modified) = metadata.modified() {
-                self.last_modified = modified;
-            }
+        if let Ok(metadata) = std::fs::metadata(&self.path)
+            && let Ok(modified) = metadata.modified()
+        {
+            self.last_modified = modified;
         }
         Ok(())
     }
@@ -313,19 +313,19 @@ impl PinstarState {
     }
 
     fn prune_selection_after_restore(&mut self) {
-        if let Some(sel_id) = self.selection.primary.clone() {
-            if !self.data.nodes.iter().any(|n| n.id() == sel_id) {
-                self.selection.primary = None;
-            }
+        if let Some(sel_id) = self.selection.primary.clone()
+            && !self.data.nodes.iter().any(|n| n.id() == sel_id)
+        {
+            self.selection.primary = None;
         }
         self.selection
             .extra
             .retain(|id| self.data.nodes.iter().any(|n| n.id() == id));
         self.drag_captured_nodes.clear();
-        if let Some(sel_id) = &self.selected_edge_id {
-            if !self.data.edges.iter().any(|e| &e.id == sel_id) {
-                self.selected_edge_id = None;
-            }
+        if let Some(sel_id) = &self.selected_edge_id
+            && !self.data.edges.iter().any(|e| &e.id == sel_id)
+        {
+            self.selected_edge_id = None;
         }
     }
 
@@ -378,10 +378,10 @@ impl PinstarState {
 
         self.prune_selection_after_restore();
 
-        if let Ok(metadata) = std::fs::metadata(&self.path) {
-            if let Ok(modified) = metadata.modified() {
-                self.last_modified = modified;
-            }
+        if let Ok(metadata) = std::fs::metadata(&self.path)
+            && let Ok(modified) = metadata.modified()
+        {
+            self.last_modified = modified;
         }
         Ok(())
     }
@@ -1183,10 +1183,10 @@ impl PinstarState {
         }
         self.record_undo_state();
         for node in &mut self.data.nodes {
-            if ids.contains(node.id()) {
-                if let crate::data::CanvasNode::Text(n) = node {
-                    n.shape = shape;
-                }
+            if ids.contains(node.id())
+                && let crate::data::CanvasNode::Text(n) = node
+            {
+                n.shape = shape;
             }
         }
         let _ = self.save();
@@ -1396,12 +1396,11 @@ impl PinstarState {
         self.drag_group_children.clear();
         let mut group_bounds = Vec::new();
 
-        if let Some(id) = &self.selection.primary {
-            if let Some(crate::data::CanvasNode::Group(n)) =
+        if let Some(id) = &self.selection.primary
+            && let Some(crate::data::CanvasNode::Group(n)) =
                 self.data.nodes.iter().find(|n| n.id() == id)
-            {
-                group_bounds.push((n.x, n.y, n.width, n.height));
-            }
+        {
+            group_bounds.push((n.x, n.y, n.width, n.height));
         }
         for id in &self.drag_captured_nodes {
             if let Some(crate::data::CanvasNode::Group(n)) =
