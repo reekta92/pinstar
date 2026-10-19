@@ -7,6 +7,5 @@ on:
 jobs:
   ci:
     permissions:
-      contents: write
-    secrets: inherit
-    uses: reekta92/.github/.github/workflows/ci.yml@main
+      contents: read
+    uses: reekta92/.github/.github/workflows/ci.yml@95f6218c96d14b0bd4b3b8b5c80e8a52bd60506f
