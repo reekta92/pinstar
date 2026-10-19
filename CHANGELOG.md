@@ -2,6 +2,42 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.0] - 2026-10-19
+
+### Added
+
+- Add bounded read-only Mermaid flowchart previews
+- Allow disabling internal hints via Settings
+- Align right-click marquee style with graf
+
+### Fixed
+
+- Tokenize YAML safely and bound raw parser work
+- Bound Mermaid expansion before semantic parsing
+- Inherit host colors in embedded diagram rows
+- Preserve local directions and sanitize shape labels
+- Retain complete subgraph titles in terminal previews
+- Preserve grapheme clusters in Mermaid labels
+- Added show_hints field to Settings initializer
+
+### Miscellaneous
+
+- Bump lru from 0.18.4 to 0.18.5
+- Bump ratatui-image from 11.0.8 to 11.1.0
+- Version bump
+- Version bump
+- Bump uuid from 1.26.0 to 1.26.1
+- Added API.md and updated README.md
+- Updated README.md
+
+### Styling
+
+- Cargo fmt
+
+### Build
+
+- Lock non-expanding YAML scanner dependencies
+- Audit Mermaid parser dependency licenses
 ## [1.0.0] - 2026-09-06
 
 ### CI
@@ -20,6 +56,7 @@ All notable changes to pinstar are documented in this file.
 
 ### Release
 
+- V1.0.0
 - V1.0.0
 - V1.0.0
 ## [0.6.0] - 2026-09-05
