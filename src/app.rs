@@ -235,12 +235,11 @@ fn run_loop(
             }
         }
 
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if let Ok(modified) = metadata.modified() {
-                if modified > state.last_modified {
-                    let _ = state.reload();
-                }
-            }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && let Ok(modified) = metadata.modified()
+            && modified > state.last_modified
+        {
+            let _ = state.reload();
         }
 
         guard.as_mut().draw(|frame| {

@@ -214,10 +214,10 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
             crate::data::NodeShape::Stadium => node_attrs.push("shape=\"ellipse\"".to_string()),
             _ => {}
         }
-        if let crate::data::CanvasNode::Text(tn) = node {
-            if let Some(ref c) = tn.color {
-                node_attrs.push(format!("color=\"{}\"", c));
-            }
+        if let crate::data::CanvasNode::Text(tn) = node
+            && let Some(ref c) = tn.color
+        {
+            node_attrs.push(format!("color=\"{}\"", c));
         }
         buf.push_str(&format!("    {} [{}];\n", node.id(), node_attrs.join(", ")));
     }
