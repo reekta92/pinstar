@@ -38,6 +38,10 @@ All notable changes to pinstar are documented in this file.
 
 - Lock non-expanding YAML scanner dependencies
 - Audit Mermaid parser dependency licenses
+
+### Release
+
+- V1.1.0
 ## [1.0.0] - 2026-09-06
 
 ### CI
