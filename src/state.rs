@@ -68,7 +68,13 @@ pub enum RenameMode {
     Id,
 }
 
+type SaveHandler = Box<dyn Fn(&Path, &str, &str) -> Result<()> + Send + Sync>;
+
 pub struct PinstarState {
+    source: String,
+    save_handler: Option<SaveHandler>,
+    save_error: Option<String>,
+    save_failed: bool,
     pub path: PathBuf,
     pub format: SupportedFormat,
     pub data: CanvasData,
@@ -159,6 +165,10 @@ impl PinstarState {
         let has_layout_override = content.contains("pinstar_layout:");
 
         Ok(Self {
+            source: content.clone(),
+            save_handler: None,
+            save_error: None,
+            save_failed: false,
             path: path.to_path_buf(),
             format,
             data,
@@ -226,11 +236,42 @@ impl PinstarState {
         })
     }
 
+    /// Let a host validate the loaded source and persist every eager save.
+    pub fn set_save_handler(
+        &mut self,
+        handler: impl Fn(&Path, &str, &str) -> Result<()> + Send + Sync + 'static,
+    ) {
+        self.save_handler = Some(Box::new(handler));
+    }
+
     pub fn save(&mut self) -> Result<()> {
-        let original = std::fs::read_to_string(&self.path).unwrap_or_default();
-        let content =
-            formats::save_to_format(&self.data, &original, self.format, self.has_layout_override)?;
-        crate::atomic_write(&self.path, &content)?;
+        let result = self.save_inner();
+        self.save_failed = result.is_err();
+        self.save_error = result.as_ref().err().map(|error| format!("{error:#}"));
+        result
+    }
+
+    pub fn take_save_error(&mut self) -> Option<String> {
+        self.save_error.take()
+    }
+
+    pub fn last_save_failed(&self) -> bool {
+        self.save_failed
+    }
+
+    fn save_inner(&mut self) -> Result<()> {
+        let content = formats::save_to_format(
+            &self.data,
+            &self.source,
+            self.format,
+            self.has_layout_override,
+        )?;
+        if let Some(handler) = &self.save_handler {
+            handler(&self.path, &self.source, &content)?;
+        } else {
+            crate::atomic_write(&self.path, &content)?;
+        }
+        self.source = content.clone();
 
         self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
         self.raw_editor
@@ -325,7 +366,10 @@ impl PinstarState {
     pub fn reload(&mut self) -> Result<()> {
         let content = std::fs::read_to_string(&self.path)?;
         let data = formats::load_from_format(&self.path, &content, self.format)?;
+        self.source = content.clone();
         self.data = data;
+        self.save_failed = false;
+        self.save_error = None;
         self.has_layout_override = content.contains("pinstar_layout:");
         self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
         self.raw_editor
@@ -1436,6 +1480,42 @@ impl PinstarState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_saves_validate_original_source_and_reload_resets_it() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("host.canvas");
+        let original = "{\"nodes\":[],\"edges\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.set_save_handler(move |target, before, after| {
+            anyhow::ensure!(
+                std::fs::read_to_string(target)? == before,
+                "external change"
+            );
+            crate::atomic_write(target, after)
+        });
+        state.save().unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, original).unwrap();
+        assert!(
+            state
+                .save()
+                .unwrap_err()
+                .to_string()
+                .contains("external change")
+        );
+        assert!(state.take_save_error().unwrap().contains("external change"));
+        assert!(state.take_save_error().is_none());
+        assert!(state.last_save_failed());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        std::fs::write(&path, saved).unwrap();
+        state.save().unwrap();
+        assert!(!state.last_save_failed());
+        std::fs::write(&path, original).unwrap();
+        state.reload().unwrap();
+        state.save().unwrap();
+    }
 
     fn canvas_with(
         nodes: Vec<crate::data::CanvasNode>,
