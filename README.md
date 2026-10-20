@@ -131,7 +131,7 @@ Default · Red · Orange · Yellow · Green · Cyan · Blue · Purple · Magenta
 
 ## Installation
 ### Pre-built Packages
-Pre-compiled binaries and system packages (`.deb`, `.rpm`, `PKGBUILD`) for Debian/Ubuntu, Fedora/RHEL, and Arch Linux are available on the GitHub **[Releases](https://github.com/reekta92/pinstar/releases)** page.
+Releases publish the `pinstar` crate to crates.io. Install the standalone binary with `cargo install pinstar`; historical binary assets remain on the GitHub Releases page.
 
 ### Via Cargo
 ```bash
@@ -151,21 +151,11 @@ pinstar can be embedded as a library in other Rust projects (e.g. [clin-rs](http
 
 ### Mermaid dependency compatibility
 
-The optional `mermaid-preview` feature stays on `merman-core 0.6.0` to support
-Rust 1.90 and the current preview API. This repository pins a compatibility fork
-that replaces archived `serde_yaml` with maintained `yaml_serde 0.10.7`.
-No advisory ignore or preview feature removal is needed.
+The optional `mermaid-preview` feature uses the published `merman-core-clin
+0.6.0` compatibility package. It preserves the upstream 0.6 parser API and
+Rust 1.90 support while using maintained `yaml_serde 0.10.7`. Consumers need no
+root Cargo patch. Upstream MIT/Apache-2.0 licensing is retained.
 
-Cargo does not propagate dependency patches to consumers or published packages.
-Applications enabling `mermaid-preview` must add this to their root manifest to
-use the maintained backend:
-
-```toml
-[patch.crates-io]
-merman-core = { git = "https://github.com/reekta92/merman", rev = "ba16ce6a43a5f0d2d070bd40cf91b958fd7e22e0" }
-```
-
-Without the root patch, crates.io consumers resolve the original 0.6.0 YAML
-backend and its unmaintained dependency advisory. Retire this patch when an
-upstream release supports the maintained backend within the supported Rust
-minimum; upgrading to 0.7 or later also requires an API migration and Rust 1.95.
+Retire the compatibility package when a maintained upstream release fits the
+host's supported compiler and parser API. See the shared development process in
+[Clin](https://github.com/reekta92/clin-rs/blob/main/docs/DEVELOPMENT.md).
