@@ -35,7 +35,7 @@ on:
         type: boolean
         default: false
       skip_gates:
-        description: "Skip fmt/clippy/tests; package verification remains mandatory"
+        description: "Skip preparation checks; real releases still run required CI and package verification"
         required: false
         type: boolean
         default: false
@@ -45,7 +45,7 @@ jobs:
     permissions:
       contents: write
       actions: write
-    uses: reekta92/.github/.github/workflows/rust-release.yml@cd3555902eaf73f17c76ca55108ab309afddd136
+    uses: reekta92/.github/.github/workflows/rust-release.yml@c688321f0d643fe76d408206365952e7d94c3385
     with:
       release_kind: crate
       all_features: true
