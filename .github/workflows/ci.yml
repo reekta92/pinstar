@@ -5,6 +5,13 @@ on:
     branches: [main, master]
   pull_request:
 jobs:
+  clin-compat:
+    permissions:
+      contents: read
+    uses: reekta92/.github/.github/workflows/clin-compat.yml@5e59e5d8bf01bfd33bffda49215b44bfe527b8e0
+    with:
+      clin_ref: 44e85153c954194d0cfe283691f4d57fc393514c
+
   ci:
     permissions:
       contents: read
