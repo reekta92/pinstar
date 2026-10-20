@@ -9,12 +9,12 @@ dialogs, and the system clipboard; pinstar owns everything canvas-related.
 ```toml
 # Cargo.toml
 [dependencies]
-pinstar = { git = "https://github.com/reekta92/pinstar", tag = "v1.0.0", features = ["images"] }
+pinstar = { version = "1.1.2", features = ["images"] }
 ```
 
 The `images` feature enables image-node support (`pinstar::image` module,
-`ratatui-image`, `lru`). Omit it for a lighter build if your host doesn't need
-inline images.
+`ratatui-image`, `lru`). Set `default-features = false` for a lighter build
+without inline images; the default feature set includes images.
 
 ## Read-only Mermaid previews
 
