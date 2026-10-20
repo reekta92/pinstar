@@ -1498,9 +1498,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "merman-core"
+name = "merman-core-clin"
 version = "0.6.0"
-source = "git+https://github.com/reekta92/merman?rev=ba16ce6a43a5f0d2d070bd40cf91b958fd7e22e0#ba16ce6a43a5f0d2d070bd40cf91b958fd7e22e0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ff880331d67814f557b0d049cea743e087ea71e6cd9bd2159eb814a2b7c1f2"
 dependencies = [
  "chrono",
  "euclid",
@@ -2003,7 +2004,7 @@ dependencies = [
  "htmlize",
  "image",
  "lru",
- "merman-core",
+ "merman-core-clin",
  "ratatui",
  "ratatui-image",
  "ratatui-textarea",

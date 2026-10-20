@@ -24,9 +24,9 @@ error. Hosts should retain fenced source with a diagnostic on errors. Pass only
 the code-block literal, not its Markdown fences. The host owns source positions,
 caching, theming defaults and scroll synchronization.
 
-Parsing uses the pinned native `merman-core` 0.6.0 grammar/semantic model (MIT /
-Apache-2.0); no JavaScript runtime or browser is required. This optional feature
-requires Rust 1.88 or newer, matching Ratatui 0.30's effective compiler floor.
+Parsing uses `merman-core-clin 0.6.0`, the MIT/Apache-2.0 compatibility package
+with the upstream 0.6 parser API and a maintained YAML backend. No JavaScript
+runtime or browser is required. Rust 1.90 or newer is required.
 The interactive `.canvas` model, parser, serializer and editing behavior are
 unchanged. Unknown or newer syntax is rejected rather than partially rendered.
 
