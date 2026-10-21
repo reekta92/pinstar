@@ -9,13 +9,13 @@ jobs:
   clin-compat:
     permissions:
       contents: read
-    uses: reekta92/.github/.github/workflows/clin-compat.yml@5e59e5d8bf01bfd33bffda49215b44bfe527b8e0
+    uses: reekta92/.github/.github/workflows/clin-compat.yml@0b563c110a6df98c00a85b44593fd3afe6863480
     with:
       clin_ref: 44e85153c954194d0cfe283691f4d57fc393514c
 
   ci:
     permissions:
       contents: read
-    uses: reekta92/.github/.github/workflows/ci.yml@54609417e5865cae957735ee6adb27cf6a995923
+    uses: reekta92/.github/.github/workflows/ci.yml@0b563c110a6df98c00a85b44593fd3afe6863480
     with:
       all_features: true
