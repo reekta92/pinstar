@@ -45,7 +45,8 @@ jobs:
     permissions:
       contents: write
       actions: write
-    uses: reekta92/.github/.github/workflows/rust-release.yml@54609417e5865cae957735ee6adb27cf6a995923
+      statuses: write
+    uses: reekta92/.github/.github/workflows/rust-release.yml@0b563c110a6df98c00a85b44593fd3afe6863480
     with:
       release_kind: crate
       all_features: true
