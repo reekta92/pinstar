@@ -2,6 +2,40 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.2] - 2026-10-21
+
+### Added
+
+- Let embedding hosts guard Canvas saves and retain failures
+
+### CI
+
+- Report verified release CI to branch protection
+- Adopt identified crates.io publication checks
+- Adopt verified packaged policy discovery
+- Include Unicode-safe consumer compatibility checks
+- Check Clin adapters against library candidates
+
+### Documentation
+
+- Align registry embedding and release credentials with maintained workflows
+
+### Fixed
+
+- Use release archive verification proven with current Cargo
+- Carry maintained Mermaid backend to registry consumers
+
+### Miscellaneous
+
+- Bump yaml-rust2 from 0.10.4 to 0.13.0
+- Bump uuid from 1.26.1 to 1.28.0
+- Bump image from 0.25.9 to 0.25.10
+- Bump merman-core from 0.6.0 to 0.9.0
+## [1.1.1] - 2026-10-19
+
+### Release
+
+- V1.1.1
 ## [1.1.0] - 2026-10-19
 
 ### Added
