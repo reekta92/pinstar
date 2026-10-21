@@ -2,6 +2,15 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.3] - 2026-10-21
+
+### CI
+
+- Release Linux archives and installation instructions (#33)
+- Pin validated Clin main
+- Pin the final portable Clin consumer
+- Include Clin native Canvas identity fixes
+- Test the published-dependency Clin consumer
 ## [1.1.2] - 2026-10-21
 
 ### Added
@@ -31,6 +40,10 @@ All notable changes to pinstar are documented in this file.
 - Bump uuid from 1.26.1 to 1.28.0
 - Bump image from 0.25.9 to 0.25.10
 - Bump merman-core from 0.6.0 to 0.9.0
+
+### Release
+
+- V1.1.2
 ## [1.1.1] - 2026-10-19
 
 ### Release
