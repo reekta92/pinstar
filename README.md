@@ -131,11 +131,11 @@ Default · Red · Orange · Yellow · Green · Cyan · Blue · Purple · Magenta
 
 ## Installation
 ### Pre-built Packages
-Releases publish the `pinstar` crate to crates.io. Install the standalone binary with `cargo install pinstar`; historical binary assets remain on the GitHub Releases page.
+[GitHub Releases](https://github.com/reekta92/pinstar/releases) include installation instructions, Linux x86_64 and ARM64 CLI archives (`pinstar-<version>-<target>.tar.xz` / `.tar.gz`), the Cargo source archive, and `SHA256SUMS`. Binary archives contain the executable at the root, `LICENSE`, and `README.md`; Linux builds require glibc 2.35 or newer. AUR maintainers can use these versioned archives and hashes in their PKGBUILDs. Each release publishes `pinstar` to crates.io before publishing its GitHub release.
 
 ### Via Cargo
 ```bash
-cargo install pinstar
+cargo install pinstar --locked
 ```
 
 ## Building from Source
