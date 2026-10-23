@@ -11,7 +11,7 @@ jobs:
       contents: read
     uses: reekta92/.github/.github/workflows/clin-compat.yml@0b563c110a6df98c00a85b44593fd3afe6863480
     with:
-      clin_ref: f7e25580b3099472bb3720f8249169f575904955
+      clin_ref: 36457f1687a96d545640eda48ea2799caabbef90
 
   ci:
     permissions:
