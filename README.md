@@ -149,6 +149,9 @@ cargo build --release
 
 pinstar can be embedded as a library in other Rust projects (e.g. [clin-rs](https://github.com/reekta92/clin-rs)). See **[API.md](API.md)** for the full integration guide covering state management, input handling, rendering, data model, and format support.
 
+Default features retain image previews and the `image` crate's default formats.
+Embedding applications can select codecs independently; see [dependency features](API.md#dependency).
+
 ### Mermaid dependency compatibility
 
 The optional `mermaid-preview` feature uses the published `merman-core-clin

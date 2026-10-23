@@ -141,6 +141,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn png_decode_and_resize_work_without_default_codecs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
+        DynamicImage::new_rgb8(8, 4)
+            .save_with_format(&path, image::ImageFormat::Png)
+            .unwrap();
+        let decoded = decode_image(&path, 4).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (4, 2));
+    }
+
+    #[test]
     fn test_eviction() {
         let mut cache = ImageCache::new(2);
 
