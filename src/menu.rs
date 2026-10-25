@@ -336,7 +336,14 @@ pub fn render_context_menu(
                 spans.push(Span::styled(" ".repeat(pad), base));
             }
             if let Some(c) = spec.shortcut {
-                spans.push(Span::styled(format!("{c} "), base.fg(theme.muted)));
+                spans.push(Span::styled(
+                    format!("{c} "),
+                    if is_selected {
+                        base
+                    } else {
+                        base.fg(theme.muted)
+                    },
+                ));
             }
             ListItem::new(Line::from(spans))
         })
