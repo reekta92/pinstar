@@ -514,6 +514,25 @@ pub fn handle_pinstar_mouse(
         (None, area)
     };
 
+    if state.context_menu.is_none()
+        && let Some(rect) = state.edge_overlay_rect
+        && contains_cell(rect, mouse.column, mouse.row)
+        && matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        )
+    {
+        let max = state
+            .selected_node_edges()
+            .len()
+            .saturating_sub(rect.height.saturating_sub(2) as usize);
+        state.edge_overlay_scroll = if mouse.kind == MouseEventKind::ScrollUp {
+            state.edge_overlay_scroll.saturating_sub(1)
+        } else {
+            state.edge_overlay_scroll.saturating_add(1).min(max)
+        };
+        return MouseOutcome::consumed();
+    }
     let (cx, cy) = state.screen_to_canvas(mouse.column, mouse.row, canvas_area);
     state.last_mouse_canvas_pos = Some((cx, cy));
 
@@ -708,7 +727,7 @@ pub fn handle_pinstar_mouse(
                 && mouse.row > ov.y
                 && mouse.row < ov.y + ov.height.saturating_sub(1)
             {
-                let row = mouse.row as usize - ov.y as usize - 1;
+                let row = state.edge_overlay_scroll + mouse.row as usize - ov.y as usize - 1;
                 if state.select_edge_of_selected_node(row + 1).is_some() {
                     state.open_edge_menu_centered(area);
                 }

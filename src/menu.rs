@@ -257,28 +257,35 @@ impl PinstarContextMenu {
             .items
             .iter()
             .map(|i| {
-                let base = i.label.chars().count();
+                let base = Line::from(i.label).width();
                 let square = if i.color_hint.is_some() { 2 } else { 0 }; // "■ "
                 let shortcut = i.shortcut.map_or(0, |_| 2); // "c "
                 base + square + shortcut + 4 // 2 left + 2 right pad
             })
             .max()
             .unwrap_or(0);
-        let width = max_content.max(8) as u16;
-        let height = self.items.len() as u16;
-        let x = self
-            .x
-            .min(area.x.saturating_add(area.width.saturating_sub(width)));
-        let y = self
-            .y
-            .min(area.y.saturating_add(area.height.saturating_sub(height)));
+        let width = max_content.max(8).min(area.width as usize) as u16;
+        let height = self.items.len().min(area.height as usize) as u16;
+        let x = self.x.clamp(
+            area.x,
+            area.x.saturating_add(area.width.saturating_sub(width)),
+        );
+        let y = self.y.clamp(
+            area.y,
+            area.y.saturating_add(area.height.saturating_sub(height)),
+        );
         Rect::new(x, y, width, height)
+    }
+
+    pub fn visible_offset(&self, height: u16) -> usize {
+        self.selected
+            .saturating_sub(height.saturating_sub(1) as usize)
     }
 
     pub fn row_at(&self, rect: Rect, col: u16, row: u16) -> Option<usize> {
         if col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
         {
-            let idx = (row - rect.y) as usize;
+            let idx = self.visible_offset(rect.height) + (row - rect.y) as usize;
             (idx < self.items.len()).then_some(idx)
         } else {
             None
@@ -300,6 +307,8 @@ pub fn render_context_menu(
         .items
         .iter()
         .enumerate()
+        .skip(menu.visible_offset(rect.height))
+        .take(rect.height as usize)
         .map(|(i, spec)| {
             let is_selected = i == menu.selected;
             let base = if is_selected {
@@ -318,7 +327,7 @@ pub fn render_context_menu(
             let label = format!("{}  ", spec.label);
             spans.push(Span::styled(label, base));
             // dynamic padding so shortcut right-aligns.
-            let content_len = spec.label.chars().count()
+            let content_len = Line::from(spec.label).width()
                 + 4
                 + usize::from(spec.color_hint.is_some())
                 + spec.shortcut.map_or(0, |_| 2);
@@ -347,7 +356,7 @@ pub fn render_context_menu(
         && row >= rect.y
         && row < rect.y + rect.height
     {
-        let idx = (row - rect.y) as usize;
+        let idx = menu.visible_offset(rect.height) + (row - rect.y) as usize;
         if idx < menu.items.len() && idx != menu.selected {
             let hover_rect = Rect::new(rect.x, row, rect.width, 1);
             let buf = frame.buffer_mut();
@@ -441,5 +450,20 @@ mod tests {
         let rect = menu.rect(Rect::new(0, 0, 40, 20));
         assert!(rect.right() <= 40);
         assert!(rect.bottom() <= 20);
+    }
+    #[test]
+    fn overflowing_menu_keeps_selection_visible_and_hit_testing_aligned() {
+        let area = ratatui::layout::Rect::new(5, 4, 12, 3);
+        let mut menu = PinstarContextMenu::new(
+            0,
+            0,
+            (0..20).map(|_| MenuItemSpec::new("界面 label")).collect(),
+            PinstarMenuType::Canvas,
+        );
+        menu.selected = 19;
+        let rect = menu.rect(area);
+        assert_eq!(rect, area);
+        assert_eq!(menu.row_at(rect, rect.x, rect.bottom() - 1), Some(19));
+        assert_eq!(menu.visible_offset(rect.height), 17);
     }
 }

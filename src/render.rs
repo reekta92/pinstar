@@ -1833,21 +1833,30 @@ fn render_edge_list_overlay(
                 r.from_title.as_deref().unwrap_or(no_title.as_str()),
                 r.to_title.as_deref().unwrap_or(no_title.as_str())
             )
-            .chars()
-            .count()
+            .into()
         })
+        .map(|line: Line<'_>| line.width())
         .max()
         .unwrap_or(0);
-    let overlay_width = (max_len + 4) as u16;
-    let overlay_height = (edges.len() + 2) as u16;
+    let overlay_width = (max_len.saturating_add(4).min(canvas_area.width as usize)) as u16;
+    let overlay_height = (edges
+        .len()
+        .saturating_add(2)
+        .min(canvas_area.height as usize)) as u16;
     let overlay_rect = Rect::new(
         canvas_area.x + canvas_area.width.saturating_sub(overlay_width),
         canvas_area.y + canvas_area.height.saturating_sub(overlay_height),
         overlay_width,
         overlay_height,
     );
+    let viewport = overlay_height.saturating_sub(2) as usize;
+    state.edge_overlay_scroll = state
+        .edge_overlay_scroll
+        .min(resolved.len().saturating_sub(viewport));
     let rows: Vec<ratatui::text::Line> = resolved
         .iter()
+        .skip(state.edge_overlay_scroll)
+        .take(viewport)
         .map(|r| {
             let edge_color = edge_overlay_color(r.color.as_deref(), theme);
             let mut spans = vec![Span::styled(
@@ -1895,10 +1904,7 @@ fn render_edge_list_overlay(
         overlay_rect.height.saturating_sub(2),
     );
     if let Some((col, row)) = mouse_pos
-        && col > hover_inner.x
-        && col < hover_inner.x + hover_inner.width
-        && row > hover_inner.y
-        && row < hover_inner.y + hover_inner.height
+        && contains_cell(hover_inner, col, row)
     {
         let buf = frame.buffer_mut();
         for c in hover_inner.left()..hover_inner.right() {
@@ -1906,6 +1912,26 @@ fn render_edge_list_overlay(
                 cell.set_style(theme.hover_style());
             }
         }
+    }
+    if resolved.len() > viewport && overlay_rect.height > 2 && overlay_rect.width > 0 {
+        let track = Rect::new(
+            overlay_rect.right() - 1,
+            overlay_rect.y + 1,
+            1,
+            overlay_rect.height - 2,
+        );
+        let mut scrollbar = ScrollbarState::new(resolved.len())
+            .viewport_content_length(viewport)
+            .position(state.edge_overlay_scroll);
+        frame.render_stateful_widget(
+            Scrollbar::default()
+                .begin_symbol(None)
+                .end_symbol(None)
+                .thumb_style(Style::default().fg(theme.accent))
+                .track_style(Style::default().fg(theme.muted)),
+            track,
+            &mut scrollbar,
+        );
     }
     state.edge_overlay_rect = Some(overlay_rect);
 }
@@ -2056,21 +2082,48 @@ fn render_rename_popup(
 ) {
     state.rename_popup_rect = None;
     if let Some(textarea) = &mut state.rename_popup {
-        let popup_area = centered_rect(60, 20, area);
-        frame.render_widget(Clear, popup_area);
-
-        textarea.set_style(theme.bg_style());
-        textarea.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.accent))
-                .style(theme.bg_style())
-                .title(Span::styled(
-                    " Rename Node — Enter: confirm · Esc: cancel ",
-                    Style::default().fg(theme.accent),
-                )),
+        let width = (area.width / 2).clamp(30.min(area.width), 80.min(area.width));
+        let height = 4.min(area.height.saturating_sub(1));
+        let popup_area = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + area.height.saturating_sub(height + 1) / 2,
+            width,
+            height,
         );
-
+        frame.render_widget(Clear, popup_area);
+        if popup_area.y > 0 {
+            let title = " RENAME NODE ";
+            let width = Line::from(title).width().min(popup_area.width as usize) as u16;
+            frame.render_widget(
+                Paragraph::new(title)
+                    .style(Style::default().fg(theme.highlight_fg).bg(theme.heading)),
+                Rect::new(
+                    popup_area.x + (popup_area.width - width) / 2,
+                    popup_area.y - 1,
+                    width,
+                    1,
+                ),
+            );
+        }
+        textarea.set_style(theme.bg_style());
+        textarea.set_cursor_style(
+            Style::default()
+                .fg(theme.highlight_fg)
+                .bg(theme.highlight_bg),
+        );
+        textarea.set_block(
+            Block::bordered()
+                .border_style(Style::default().fg(theme.heading))
+                .style(theme.bg_style()),
+        );
+        if state.settings.show_hints && popup_area.bottom() < area.bottom() {
+            frame.render_widget(
+                Paragraph::new("Enter confirm · Esc cancel")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(theme.muted).bg(theme.hint_line_bg())),
+                Rect::new(popup_area.x, popup_area.bottom(), popup_area.width, 1),
+            );
+        }
         state.rename_popup_rect = Some(Block::default().borders(Borders::ALL).inner(popup_area));
         frame.render_widget(&*textarea, popup_area);
     }
@@ -2305,5 +2358,33 @@ mod tests {
                 draw_pinstar_view(f, &mut state, &theme, f.area(), Some((6, 6)));
             })
             .unwrap();
+    }
+    #[test]
+    fn rename_uses_shared_prompt_geometry_and_only_standalone_hints() {
+        let (_dir, path) = temp_canvas(r#"{"nodes":[],"edges":[]}"#);
+        let mut state = PinstarState::load(&path).unwrap();
+        let theme = ThemeColors::default();
+        for (width, height) in [(80, 24), (120, 40), (40, 12)] {
+            for hints in [false, true] {
+                state.settings.show_hints = hints;
+                state.rename_popup = Some(ratatui_textarea::TextArea::default());
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| render_rename_popup(frame, &mut state, &theme, frame.area()))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let text = (0..height)
+                    .map(|y| {
+                        (0..width)
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(text.contains("RENAME NODE"));
+                assert_eq!(text.contains("Enter confirm"), hints);
+                assert!(state.rename_popup_rect.unwrap().right() <= width);
+            }
+        }
     }
 }
