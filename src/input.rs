@@ -1349,6 +1349,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn undo_restores_text_before_inline_editing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        std::fs::write(&path, r#"{"nodes":[{"type":"text","id":"a","x":1,"y":1,"width":200,"height":100,"text":"before"}],"edges":[]}"#).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.selection.select_only("a".into());
+        state.toggle_editor();
+        let mut running = true;
+        let area = Rect::new(0, 0, 80, 24);
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE),
+            &mut running,
+            area,
+        );
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &mut running,
+            area,
+        );
+        assert_ne!(state.data.nodes[0].text(), "before");
+        state.undo().unwrap();
+        assert_eq!(state.data.nodes[0].text(), "before");
+        state.redo().unwrap();
+        assert_ne!(state.data.nodes[0].text(), "before");
+    }
+
+    #[test]
     fn image_node_menu_item_sets_picker_trigger() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("c.canvas");
