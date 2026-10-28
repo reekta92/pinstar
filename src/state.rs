@@ -297,11 +297,15 @@ impl PinstarState {
         if let Some(handler) = &self.save_handler {
             handler(&self.path, &self.source, &content)?;
         } else {
+            use std::io::Read;
             // Cooperating writers must not interleave source validation and replacement.
-            let lock = std::fs::File::open(&self.path)?;
+            let mut lock = std::fs::File::open(&self.path)?;
             lock.try_lock()?;
+            // Windows requires reading through the handle that owns the exclusive lock.
+            let mut current_source = String::new();
+            lock.read_to_string(&mut current_source)?;
             anyhow::ensure!(
-                std::fs::read_to_string(&self.path)? == self.source,
+                current_source == self.source,
                 "File changed externally; reload before saving (pending edits retained)"
             );
             if content != self.source {
@@ -1686,8 +1690,8 @@ mod tests {
         state.add_text_node(0.0, 0.0);
         assert!(state.last_save_failed());
         assert!(state.has_unsaved_changes());
-        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 0);
         drop(lock);
+        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 0);
         state.save().unwrap();
         assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 1);
     }
