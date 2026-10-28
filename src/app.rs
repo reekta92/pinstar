@@ -265,10 +265,9 @@ fn run_loop(
             && !state.has_unsaved_changes()
             && state.floating_editor.is_none()
             && !state.editor_focus
+            && let Err(error) = state.reload()
         {
-            if let Err(error) = state.reload() {
-                state.footer_hint = format!("Reload failed: {error:#}");
-            }
+            state.footer_hint = format!("Reload failed: {error:#}");
         }
 
         if let Some(error) = state.take_save_error() {

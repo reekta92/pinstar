@@ -280,11 +280,7 @@ impl PinstarState {
     }
 
     fn save_inner(&mut self) -> Result<()> {
-        anyhow::ensure!(
-            self.pending_source.is_some()
-                || self.raw_editor.lines() == self.raw_editor_source.as_slice(),
-            "Source edits pending; apply them with Ctrl+S in the source pane before saving"
-        );
+        self.ensure_raw_applied()?;
         let content = if self.data == self.saved_data
             && self.has_layout_override == self.saved_layout_override
             && self.pending_source.is_none()
@@ -301,6 +297,9 @@ impl PinstarState {
         if let Some(handler) = &self.save_handler {
             handler(&self.path, &self.source, &content)?;
         } else {
+            // Cooperating writers must not interleave source validation and replacement.
+            let lock = std::fs::File::open(&self.path)?;
+            lock.try_lock()?;
             anyhow::ensure!(
                 std::fs::read_to_string(&self.path)? == self.source,
                 "File changed externally; reload before saving (pending edits retained)"
@@ -374,11 +373,7 @@ impl PinstarState {
     }
 
     pub fn undo(&mut self) -> Result<()> {
-        anyhow::ensure!(
-            self.raw_editor.lines() == self.raw_editor_source.as_slice()
-                || self.pending_source.is_some(),
-            "Apply pending source edits before undo"
-        );
+        self.ensure_raw_applied()?;
         self.undo_sources
             .resize_with(self.undo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.undo_stack.pop() {
@@ -407,11 +402,7 @@ impl PinstarState {
     }
 
     pub fn redo(&mut self) -> Result<()> {
-        anyhow::ensure!(
-            self.raw_editor.lines() == self.raw_editor_source.as_slice()
-                || self.pending_source.is_some(),
-            "Apply pending source edits before redo"
-        );
+        self.ensure_raw_applied()?;
         self.redo_sources
             .resize_with(self.redo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.redo_stack.pop() {
@@ -825,6 +816,24 @@ impl PinstarState {
             .set_cursor_line_style(ratatui::style::Style::default());
         self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
         self.raw_editor_source = self.raw_editor.lines().to_vec();
+    }
+
+    fn ensure_raw_applied(&mut self) -> Result<()> {
+        if self.raw_editor.lines() != self.raw_editor_source.as_slice()
+            && !self.pending_source.as_deref().is_some_and(|source| {
+                self.raw_editor
+                    .lines()
+                    .iter()
+                    .map(String::as_str)
+                    .eq(source.split('\n'))
+            })
+        {
+            let message =
+                "Source edits pending; apply them with Ctrl+S in the source pane before saving";
+            self.save_error = Some(message.into());
+            anyhow::bail!(message);
+        }
+        Ok(())
     }
 
     pub fn pan(&mut self, dx: f64, dy: f64) {
@@ -1646,6 +1655,41 @@ mod tests {
         );
         assert!(state.has_unsaved_changes());
         assert!(state.raw_editor.lines().join("\n").contains("draft"));
+        state.raw_editor.insert_str(" invalid new edit");
+        state.set_save_handler(|path, _, after| crate::atomic_write(path, after));
+        assert!(
+            state
+                .save()
+                .unwrap_err()
+                .to_string()
+                .contains("Source edits pending")
+        );
+        assert!(
+            state
+                .raw_editor
+                .lines()
+                .join("\n")
+                .contains("invalid new edit")
+        );
+        assert!(
+            !std::fs::read_to_string(&state.path)
+                .unwrap()
+                .contains("draft")
+        );
+    }
+
+    #[test]
+    fn concurrent_writer_lock_retains_pending_changes_until_retry() {
+        let (_dir, mut state) = canvas_with(vec![], vec![]);
+        let lock = std::fs::File::open(&state.path).unwrap();
+        lock.lock().unwrap();
+        state.add_text_node(0.0, 0.0);
+        assert!(state.last_save_failed());
+        assert!(state.has_unsaved_changes());
+        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 0);
+        drop(lock);
+        state.save().unwrap();
+        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 1);
     }
 
     #[test]

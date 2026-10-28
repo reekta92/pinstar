@@ -495,7 +495,8 @@ see the README compatibility notes. Canvas saves merge additional JSON fields
 from the source by node/edge ID, without adding fields to the public data types.
 
 Default saves compare the loaded source with disk immediately before writing
-and reject stale state. This detects changes between save operations; it is not
+and reject stale state. A nonblocking file lock coordinates cooperating writers;
+busy saves retain their edits for retry. This detects changes between save operations; it is not
 a filesystem transaction with unrelated editors. Hosts requiring stronger
 coordination can use `set_save_handler`. Host callbacks still receive every
 explicit/eager save, including unchanged content. Successful default saves skip
