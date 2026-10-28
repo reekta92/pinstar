@@ -1153,17 +1153,15 @@ impl PinstarState {
             return;
         }
         let final_id = if new_id.is_empty() {
-            uuid::Uuid::new_v4().to_string()
+            format!("node_{}", uuid::Uuid::new_v4().simple())
         } else {
             new_id
         };
         if self.data.nodes.iter().any(|node| node.id() == final_id)
-            || (self.format.is_flowchart()
-                && !final_id
-                    .bytes()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-'))
+            || !formats::valid_node_id(&final_id, self.format)
         {
-            self.save_error = Some("Node ID must be unique; flowchart IDs allow only ASCII letters, digits, '_' and '-'".into());
+            self.save_error =
+                Some("Node ID must be unique and valid for this diagram format".into());
             return;
         }
         self.record_undo_state();

@@ -1,36 +1,33 @@
 use crate::data::{CanvasData, CanvasEdge, CanvasNode, TextNode};
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub fn parse(content: &str) -> Result<CanvasData> {
-    let mut nodes_map = HashMap::new();
+    let mut nodes_map = BTreeMap::new();
     let mut edges = Vec::new();
-    let mut positions = HashMap::new();
-    let mut shapes_map = HashMap::new();
+    let mut positions = BTreeMap::new();
+    let mut shapes_map = BTreeMap::new();
     let mut orientation = crate::data::DiagramOrientation::TopDown;
 
-    let meta_re = Regex::new(
-        r"^'\s*pinstar_layout:\s+(\S+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)\s+([\d\.-]+)",
-    )
-    .unwrap();
+    let meta_re =
+        Regex::new(r"^'\s*pinstar_layout:\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$").unwrap();
 
     // Captures declarations like: object my_node, database cache
-    let decl_re = Regex::new(
-        r"(?i)^\s*(object|class|usecase|state|node|rectangle|agent|database)\s+([a-zA-Z0-9_\-]+)",
-    )
-    .unwrap();
+    let decl_re = Regex::new(r"(?i)^\s*(object|usecase|database)\s+([a-zA-Z0-9_\-]+)$").unwrap();
 
     // Captures label assignments like: my_node : "This is the text"
     let label_assign_re = Regex::new(r"^\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$").unwrap();
 
     // Captures connections: A --> B or A ..> B
-    let edge_re = Regex::new(r"([a-zA-Z0-9_\-]+)\s*(?:-+>|\.+>)\s*([a-zA-Z0-9_\-]+)").unwrap();
+    let edge_re = Regex::new(r"^([a-zA-Z0-9_\-]+)\s*(?:-->|\.\.>)\s*([a-zA-Z0-9_\-]+)$").unwrap();
     let edge_label_re =
-        Regex::new(r"([a-zA-Z0-9_\-]+)\s*(?:-+>|\.+>)\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$")
+        Regex::new(r"^([a-zA-Z0-9_\-]+)\s*(?:-->|\.\.>)\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*?)\s*$")
             .unwrap();
     let id_pattern = Regex::new(r"^[a-zA-Z0-9_\-]+$").unwrap();
 
+    let mut opened = false;
+    let mut closed = false;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -40,30 +37,45 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         // 1. Extract Layout Metadata
         if let Some(caps) = meta_re.captures(trimmed) {
             let id = caps[1].to_string();
-            let x: f64 = caps[2].parse().unwrap_or(0.0);
-            let y: f64 = caps[3].parse().unwrap_or(0.0);
-            let w: f64 = caps[4].parse().unwrap_or(200.0);
-            let h: f64 = caps[5].parse().unwrap_or(100.0);
+            let (x, y, w, h) = super::parse_layout(&caps[2], &caps[3], &caps[4], &caps[5])?;
             positions.insert(id, (x, y, w, h));
             continue;
         }
 
         // Check for PlantUML layout orientation
-        if trimmed.to_lowercase().contains("left to right direction") {
+        if trimmed.eq_ignore_ascii_case("left to right direction") {
             orientation = crate::data::DiagramOrientation::LeftRight;
             continue;
-        } else if trimmed.to_lowercase().contains("down to top direction")
-            || trimmed.to_lowercase().contains("bottom to top direction")
+        } else if trimmed.eq_ignore_ascii_case("down to top direction")
+            || trimmed.eq_ignore_ascii_case("bottom to top direction")
         {
             orientation = crate::data::DiagramOrientation::DownTop;
             continue;
         }
 
         // Skip PlantUML framing markers
-        if trimmed.starts_with("@start") || trimmed.starts_with("@end") || trimmed.starts_with("'")
-        {
+        if trimmed == "@startuml" {
+            ensure!(!opened, "Multiple PlantUML diagrams are unsupported");
+            opened = true;
             continue;
         }
+        if trimmed == "@enduml" {
+            ensure!(opened && !closed, "Unexpected PlantUML end marker");
+            closed = true;
+            continue;
+        }
+        if trimmed == "' pinstar_orientation: RL" {
+            orientation = crate::data::DiagramOrientation::RightLeft;
+            continue;
+        }
+        if trimmed.starts_with("'") {
+            ensure!(
+                !trimmed.contains("pinstar_layout:"),
+                "Invalid PlantUML layout metadata"
+            );
+            continue;
+        }
+        ensure!(opened && !closed, "Expected a PlantUML diagram body");
 
         // 2. Parse Edge Connections (Match labeled edges first)
         if let Some(caps) = edge_label_re.captures(trimmed) {
@@ -72,7 +84,7 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             let mut label = caps[3].to_string();
 
             if label.starts_with('"') && label.ends_with('"') && label.len() >= 2 {
-                label = label[1..label.len() - 1].to_string();
+                label = serde_json::from_str(&label)?;
             }
 
             let style = if trimmed.contains("..") {
@@ -87,7 +99,7 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
 
             edges.push(CanvasEdge {
-                id: format!("edge_{}_{}", from, to),
+                id: format!("edge_{}_{}_{}", from, to, edges.len()),
                 from_node: from,
                 to_node: to,
                 from_side: Some("right".to_string()),
@@ -115,7 +127,7 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             nodes_map.entry(to.clone()).or_insert_with(|| to.clone());
 
             edges.push(CanvasEdge {
-                id: format!("edge_{}_{}", from, to),
+                id: format!("edge_{}_{}_{}", from, to, edges.len()),
                 from_node: from,
                 to_node: to,
                 from_side: Some("right".to_string()),
@@ -147,7 +159,7 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             let mut text = caps[2].to_string();
 
             if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
-                text = text[1..text.len() - 1].to_string();
+                text = serde_json::from_str(&text)?;
             }
 
             nodes_map.insert(id, text);
@@ -160,8 +172,13 @@ pub fn parse(content: &str) -> Result<CanvasData> {
             nodes_map
                 .entry(clean_id.to_string())
                 .or_insert_with(|| clean_id.to_string());
+            continue;
         }
+        anyhow::bail!(
+            "Unsupported PlantUML syntax (only object/usecase/database diagrams are editable): {trimmed}"
+        );
     }
+    ensure!(opened && closed, "Incomplete PlantUML diagram");
 
     let mut canvas_nodes = Vec::new();
     for (id, label) in nodes_map {
@@ -194,10 +211,13 @@ pub fn parse(content: &str) -> Result<CanvasData> {
 }
 
 pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
+    super::validate_flowchart(data, super::SupportedFormat::PlantUml)?;
     let mut buf = String::new();
     buf.push_str("@startuml\n");
 
-    if data.orientation == crate::data::DiagramOrientation::LeftRight {
+    if data.orientation == crate::data::DiagramOrientation::RightLeft {
+        buf.push_str("' pinstar_orientation: RL\n");
+    } else if data.orientation == crate::data::DiagramOrientation::LeftRight {
         buf.push_str("left to right direction\n");
     } else if data.orientation == crate::data::DiagramOrientation::DownTop {
         buf.push_str("down to top direction\n");
@@ -209,7 +229,7 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
             let (x, y) = node.pos();
             let (w, h) = node.size();
             buf.push_str(&format!(
-                "' pinstar_layout: {} {:.1} {:.1} {:.1} {:.1}\n",
+                "' pinstar_layout: {} {} {} {} {}\n",
                 node.id(),
                 x,
                 y,
@@ -231,8 +251,11 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
 
     // Text Labels
     for node in &data.nodes {
-        let escaped = node.text().replace('"', "\\\"");
-        buf.push_str(&format!("{} : \"{}\"\n", node.id(), escaped));
+        buf.push_str(&format!(
+            "{} : {}\n",
+            node.id(),
+            serde_json::to_string(node.text())?
+        ));
     }
 
     // Connections
@@ -242,9 +265,9 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
             _ => "-->",
         };
         if let Some(ref lbl) = edge.label {
-            let escaped_lbl = lbl.replace('"', "\\\"");
+            let escaped_lbl = serde_json::to_string(lbl)?;
             buf.push_str(&format!(
-                "{} {} {} : \"{}\"\n",
+                "{} {} {} : {}\n",
                 edge.from_node, arrow, edge.to_node, escaped_lbl
             ));
         } else {
@@ -259,6 +282,27 @@ pub fn serialize(data: &CanvasData, write_layout: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_activity_and_incomplete_diagrams_are_rejected() {
+        for source in [
+            "@startuml\nstart\n:Do work;\nstop\n@enduml",
+            "@startuml\nclass A {\nfield\n}\n@enduml",
+            "@startuml\nA --> B",
+            "@startuml\nA --> B --> C\n@enduml",
+        ] {
+            assert!(parse(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn escaped_labels_and_right_left_orientation_round_trip() {
+        let mut data = parse("@startuml\nA --> B\n@enduml").unwrap();
+        data.nodes[0].set_text("quote \" and \\ path\nnext".into());
+        data.edges[0].label = Some("label \" and \\ path\nnext".into());
+        data.orientation = crate::data::DiagramOrientation::RightLeft;
+        assert_eq!(parse(&serialize(&data, true).unwrap()).unwrap(), data);
+    }
 
     #[test]
     fn test_plantuml_basic() {

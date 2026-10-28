@@ -6,6 +6,78 @@ use crate::data::{CanvasData, CanvasNode};
 use anyhow::Result;
 use std::path::Path;
 
+fn parse_layout(x: &str, y: &str, width: &str, height: &str) -> Result<(f64, f64, f64, f64)> {
+    let (x, y, width, height): (f64, f64, f64, f64) =
+        (x.parse()?, y.parse()?, width.parse()?, height.parse()?);
+    validate_layout(x, y, width, height)?;
+    Ok((x, y, width, height))
+}
+
+fn validate_layout(x: f64, y: f64, width: f64, height: f64) -> Result<()> {
+    anyhow::ensure!(
+        [x, y, width, height].iter().all(|value| value.is_finite()) && width > 0.0 && height > 0.0,
+        "Layout requires finite coordinates and positive dimensions"
+    );
+    Ok(())
+}
+
+pub(crate) fn valid_node_id(id: &str, format: SupportedFormat) -> bool {
+    if format == SupportedFormat::Canvas {
+        return !id.is_empty();
+    }
+    !id.is_empty()
+        && (format != SupportedFormat::Dot
+            || !id.as_bytes()[0].is_ascii_digit()
+            || id.bytes().all(|ch| ch.is_ascii_digit()))
+        && id.bytes().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || ch == b'_'
+                || (ch == b'-' && format != SupportedFormat::Dot)
+        })
+        && !match format {
+            SupportedFormat::Mermaid => [
+                "end",
+                "graph",
+                "flowchart",
+                "subgraph",
+                "direction",
+                "class",
+                "classDef",
+                "style",
+                "linkStyle",
+                "click",
+            ]
+            .contains(&id),
+            SupportedFormat::Dot => {
+                ["node", "edge", "graph", "digraph", "strict", "subgraph"].contains(&id)
+            }
+            _ => false,
+        }
+}
+
+fn validate_flowchart(data: &CanvasData, format: SupportedFormat) -> Result<()> {
+    let mut ids = std::collections::HashSet::new();
+    for node in &data.nodes {
+        anyhow::ensure!(
+            matches!(node, CanvasNode::Text(_))
+                && valid_node_id(node.id(), format)
+                && ids.insert(node.id()),
+            "Unsupported or duplicate flowchart node ID/type: {}",
+            node.id()
+        );
+        let (x, y) = node.pos();
+        let (width, height) = node.size();
+        validate_layout(x, y, width, height)?;
+    }
+    for edge in &data.edges {
+        anyhow::ensure!(
+            ids.contains(edge.from_node.as_str()) && ids.contains(edge.to_node.as_str()),
+            "Connection references a missing node"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SupportedFormat {
     Canvas,
