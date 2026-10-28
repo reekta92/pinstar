@@ -139,14 +139,27 @@ fn run_loop(
         #[cfg(feature = "images")]
         if let Some(worker) = &worker {
             while let Ok(result) = worker.rx.try_recv() {
-                if let (Ok(img), Some(picker)) = (result, state.image_picker.as_ref()) {
-                    state.image_cache.install_decoded(img, picker);
+                match result {
+                    Ok(img) => {
+                        if let Some(picker) = state.image_picker.as_ref() {
+                            state.image_cache.install_decoded(img, picker);
+                        }
+                    }
+                    Err(error) => {
+                        state.image_cache.finish_failed(&error);
+                        state.footer_hint = error.to_string();
+                    }
                 }
             }
         }
 
         if state.trigger_whole_file_editor {
             state.trigger_whole_file_editor = false;
+            if state.has_unsaved_changes() {
+                state.footer_hint =
+                    "Save or discard pending edits before opening the whole file externally".into();
+                continue;
+            }
 
             let parts: Vec<&str> = external_editor.split_whitespace().collect();
             let (program, editor_args) = parts
@@ -164,21 +177,31 @@ fn run_loop(
             if command.spawn().is_err() {
                 // If generic x-terminal-emulator isn't present, gracefully degrade
                 // to suspended inline terminal edit
-                let _ = guard.suspend();
+                guard.suspend()?;
                 let mut fallback = std::process::Command::new(program);
                 for arg in &editor_args {
                     fallback.arg(arg);
                 }
                 fallback.arg(&state.path);
-                let _ = fallback.status();
-                let _ = guard.resume();
-                let _ = state.reload();
+                let status = fallback.status();
+                guard.resume()?;
+                match status {
+                    Ok(status) if status.success() => {
+                        if let Err(error) = state.reload() {
+                            state.footer_hint = format!("Reload failed: {error:#}");
+                        }
+                    }
+                    Ok(status) => {
+                        state.footer_hint = format!("External editor exited with {status}")
+                    }
+                    Err(error) => state.footer_hint = format!("External editor failed: {error}"),
+                }
             }
         }
 
         if state.trigger_ext_editor {
             state.trigger_ext_editor = false;
-            if let Some(node_id) = &state.selection.primary {
+            if let Some(node_id) = state.selection.primary.clone() {
                 let node_text = state
                     .data
                     .nodes
@@ -190,7 +213,7 @@ fn run_loop(
                 let temp_dir = std::env::temp_dir();
                 let temp_id = uuid::Uuid::new_v4().to_string();
                 let temp_file_path = temp_dir.join(format!("clin_pinstar_{temp_id}.md"));
-                std::fs::write(&temp_file_path, &node_text)?;
+                pinstar::atomic_write(&temp_file_path, &node_text)?;
 
                 guard.suspend()?;
 
@@ -212,6 +235,7 @@ fn run_loop(
                 if let Ok(new_text) = std::fs::read_to_string(&temp_file_path)
                     && new_text != node_text
                 {
+                    state.record_undo_state();
                     for node in &mut state.data.nodes {
                         if node.id() == node_id {
                             node.set_text(new_text);
@@ -237,9 +261,17 @@ fn run_loop(
 
         if let Ok(metadata) = std::fs::metadata(path)
             && let Ok(modified) = metadata.modified()
-            && modified > state.last_modified
+            && modified != state.last_modified
+            && !state.has_unsaved_changes()
+            && state.floating_editor.is_none()
+            && !state.editor_focus
+            && let Err(error) = state.reload()
         {
-            let _ = state.reload();
+            state.footer_hint = format!("Reload failed: {error:#}");
+        }
+
+        if let Some(error) = state.take_save_error() {
+            state.footer_hint = format!("{error} · Ctrl+S retry · Ctrl+Q discard and quit");
         }
 
         guard.as_mut().draw(|frame| {
@@ -252,6 +284,9 @@ fn run_loop(
                 let area = guard.as_mut().size()?;
                 match crossterm::event::read()? {
                     crossterm::event::Event::Key(key) => {
+                        if !state.last_save_failed() {
+                            state.footer_hint.clear();
+                        }
                         handle_pinstar_event(state, key, &mut running, area.into());
                     }
                     crossterm::event::Event::Mouse(mouse) => {
@@ -260,13 +295,12 @@ fn run_loop(
                     }
                     _ => {}
                 }
-                if !crossterm::event::poll(Duration::ZERO)? {
+                if !running || !crossterm::event::poll(Duration::ZERO)? {
                     break;
                 }
             }
         }
     }
 
-    let _ = state.save();
     Ok(())
 }

@@ -72,6 +72,12 @@ type SaveHandler = Box<dyn Fn(&Path, &str, &str) -> Result<()> + Send + Sync>;
 
 pub struct PinstarState {
     source: String,
+    saved_data: CanvasData,
+    saved_layout_override: bool,
+    pending_source: Option<String>,
+    raw_editor_source: Vec<String>,
+    undo_sources: Vec<String>,
+    redo_sources: Vec<String>,
     save_handler: Option<SaveHandler>,
     save_error: Option<String>,
     save_failed: bool,
@@ -151,7 +157,7 @@ pub(crate) enum PinstarTextField {
 impl PinstarState {
     pub fn load(path: &Path) -> Result<Self> {
         let format = formats::detect_format(path);
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(path)?;
         let data = formats::load_from_format(path, &content, format)?;
         let mut raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
         raw_editor.set_cursor_line_style(ratatui::style::Style::default());
@@ -166,6 +172,12 @@ impl PinstarState {
 
         Ok(Self {
             source: content.clone(),
+            saved_data: data.clone(),
+            saved_layout_override: has_layout_override,
+            pending_source: None,
+            raw_editor_source: raw_editor.lines().to_vec(),
+            undo_sources: Vec::new(),
+            redo_sources: Vec::new(),
             save_handler: None,
             save_error: None,
             save_failed: false,
@@ -259,24 +271,53 @@ impl PinstarState {
         self.save_failed
     }
 
+    /// Includes source edits that have not yet been applied to the diagram.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.data != self.saved_data
+            || self.has_layout_override != self.saved_layout_override
+            || self.pending_source.is_some()
+            || self.raw_editor.lines() != self.raw_editor_source.as_slice()
+    }
+
     fn save_inner(&mut self) -> Result<()> {
-        let content = formats::save_to_format(
-            &self.data,
-            &self.source,
-            self.format,
-            self.has_layout_override,
-        )?;
+        self.ensure_raw_applied()?;
+        let content = if self.data == self.saved_data
+            && self.has_layout_override == self.saved_layout_override
+            && self.pending_source.is_none()
+        {
+            self.source.clone()
+        } else {
+            formats::save_to_format(
+                &self.data,
+                self.pending_source.as_deref().unwrap_or(&self.source),
+                self.format,
+                self.has_layout_override,
+            )?
+        };
         if let Some(handler) = &self.save_handler {
             handler(&self.path, &self.source, &content)?;
         } else {
-            crate::atomic_write(&self.path, &content)?;
+            use std::io::Read;
+            // Cooperating writers must not interleave source validation and replacement.
+            let mut lock = std::fs::File::open(&self.path)?;
+            lock.try_lock()?;
+            // Windows requires reading through the handle that owns the exclusive lock.
+            let mut current_source = String::new();
+            lock.read_to_string(&mut current_source)?;
+            anyhow::ensure!(
+                current_source == self.source,
+                "File changed externally; reload before saving (pending edits retained)"
+            );
+            if content != self.source {
+                crate::atomic_write(&self.path, &content)?;
+            }
         }
         self.source = content.clone();
+        self.saved_data = self.data.clone();
+        self.saved_layout_override = self.has_layout_override;
+        self.pending_source = None;
 
-        self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
-        self.raw_editor
-            .set_cursor_line_style(ratatui::style::Style::default());
-        self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
+        self.set_raw_editor_content(&content);
 
         if let Ok(metadata) = std::fs::metadata(&self.path)
             && let Ok(modified) = metadata.modified()
@@ -305,11 +346,17 @@ impl PinstarState {
             data: self.data.clone(),
             has_layout_override: self.has_layout_override,
         };
+        self.undo_sources
+            .resize_with(self.undo_stack.len(), || self.source.clone());
+        self.undo_sources
+            .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
         self.undo_stack.push(snapshot);
         if self.undo_stack.len() > 100 {
             self.undo_stack.remove(0);
+            self.undo_sources.remove(0);
         }
         self.redo_stack.clear();
+        self.redo_sources.clear();
     }
 
     fn prune_selection_after_restore(&mut self) {
@@ -330,12 +377,24 @@ impl PinstarState {
     }
 
     pub fn undo(&mut self) -> Result<()> {
+        self.ensure_raw_applied()?;
+        self.undo_sources
+            .resize_with(self.undo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.undo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
                 has_layout_override: self.has_layout_override,
             };
+            self.redo_sources
+                .resize_with(self.redo_stack.len(), || self.source.clone());
+            self.redo_sources
+                .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
             self.redo_stack.push(current);
+            self.pending_source = Some(
+                self.undo_sources
+                    .pop()
+                    .unwrap_or_else(|| self.source.clone()),
+            );
 
             self.data = snapshot.data;
             self.has_layout_override = snapshot.has_layout_override;
@@ -347,12 +406,24 @@ impl PinstarState {
     }
 
     pub fn redo(&mut self) -> Result<()> {
+        self.ensure_raw_applied()?;
+        self.redo_sources
+            .resize_with(self.redo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.redo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
                 has_layout_override: self.has_layout_override,
             };
+            self.undo_sources
+                .resize_with(self.undo_stack.len(), || self.source.clone());
+            self.undo_sources
+                .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
             self.undo_stack.push(current);
+            self.pending_source = Some(
+                self.redo_sources
+                    .pop()
+                    .unwrap_or_else(|| self.source.clone()),
+            );
 
             self.data = snapshot.data;
             self.has_layout_override = snapshot.has_layout_override;
@@ -367,14 +438,14 @@ impl PinstarState {
         let content = std::fs::read_to_string(&self.path)?;
         let data = formats::load_from_format(&self.path, &content, self.format)?;
         self.source = content.clone();
+        self.saved_data = data.clone();
+        self.saved_layout_override = content.contains("pinstar_layout:");
+        self.pending_source = None;
         self.data = data;
         self.save_failed = false;
         self.save_error = None;
         self.has_layout_override = content.contains("pinstar_layout:");
-        self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
-        self.raw_editor
-            .set_cursor_line_style(ratatui::style::Style::default());
-        self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
+        self.set_raw_editor_content(&content);
 
         self.prune_selection_after_restore();
 
@@ -707,7 +778,8 @@ impl PinstarState {
 
     pub fn sync_from_raw_editor(&mut self) -> Result<()> {
         let content = self.raw_editor.lines().join("\n");
-        if let Ok(mut data) = formats::load_from_format(&self.path, &content, self.format) {
+        let result = (|| -> Result<()> {
+            let mut data = formats::load_from_format(&self.path, &content, self.format)?;
             self.record_undo_state();
             // Force re-layout if orientation changed
             if data.orientation != self.data.orientation && self.format != SupportedFormat::Canvas {
@@ -715,19 +787,57 @@ impl PinstarState {
             }
             self.has_layout_override = content.contains("pinstar_layout:");
             self.data = data;
-            let _ = self.save();
-            Ok(())
-        } else {
-            anyhow::bail!("Invalid diagram syntax in editor")
+            self.pending_source = Some(content);
+            self.save()
+        })();
+        if let Err(error) = &result {
+            self.save_failed = true;
+            self.save_error = Some(format!("{error:#}"));
         }
+        result
     }
 
     pub fn sync_to_raw_editor(&mut self) {
-        if let Ok(content) = serde_json::to_string_pretty(&self.data) {
-            self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
-            self.raw_editor
-                .set_cursor_line_style(ratatui::style::Style::default());
+        if self.raw_editor.lines() != self.raw_editor_source.as_slice() {
+            return;
         }
+        if self.data == self.saved_data && self.pending_source.is_none() {
+            let content = self.source.clone();
+            self.set_raw_editor_content(&content);
+        } else if let Ok(content) = formats::save_to_format(
+            &self.data,
+            self.pending_source.as_deref().unwrap_or(&self.source),
+            self.format,
+            self.has_layout_override,
+        ) {
+            self.set_raw_editor_content(&content);
+        }
+    }
+
+    fn set_raw_editor_content(&mut self, content: &str) {
+        self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
+        self.raw_editor
+            .set_cursor_line_style(ratatui::style::Style::default());
+        self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
+        self.raw_editor_source = self.raw_editor.lines().to_vec();
+    }
+
+    fn ensure_raw_applied(&mut self) -> Result<()> {
+        if self.raw_editor.lines() != self.raw_editor_source.as_slice()
+            && !self.pending_source.as_deref().is_some_and(|source| {
+                self.raw_editor
+                    .lines()
+                    .iter()
+                    .map(String::as_str)
+                    .eq(source.split('\n'))
+            })
+        {
+            let message =
+                "Source edits pending; apply them with Ctrl+S in the source pane before saving";
+            self.save_error = Some(message.into());
+            anyhow::bail!(message);
+        }
+        Ok(())
     }
 
     pub fn pan(&mut self, dx: f64, dy: f64) {
@@ -936,7 +1046,6 @@ impl PinstarState {
         };
         if let Some(text) = editor_text {
             if self.selection.primary.is_some() {
-                self.record_undo_state();
                 let node_id = self
                     .selection
                     .primary
@@ -959,6 +1068,7 @@ impl PinstarState {
                 TextArea::from(node.text().lines().map(String::from).collect::<Vec<_>>());
             textarea.set_cursor_line_style(ratatui::style::Style::default());
             textarea.set_wrap_mode(WrapMode::WordOrGlyph);
+            self.record_undo_state();
             self.floating_editor = Some(textarea);
         }
     }
@@ -1094,15 +1204,41 @@ impl PinstarState {
         let Some(old_id) = self.selection.primary.clone() else {
             return;
         };
-        self.record_undo_state();
         if old_id == new_id {
             return;
         }
         let final_id = if new_id.is_empty() {
-            uuid::Uuid::new_v4().to_string()
+            format!("node_{}", uuid::Uuid::new_v4().simple())
         } else {
             new_id
         };
+        if self.data.nodes.iter().any(|node| node.id() == final_id)
+            || !formats::valid_node_id(&final_id, self.format)
+        {
+            self.save_error =
+                Some("Node ID must be unique and valid for this diagram format".into());
+            return;
+        }
+        self.record_undo_state();
+        if self.format == SupportedFormat::Canvas {
+            let renamed_source = (|| -> Result<String> {
+                let mut source: serde_json::Value =
+                    serde_json::from_str(self.pending_source.as_deref().unwrap_or(&self.source))?;
+                for node in source["nodes"].as_array_mut().into_iter().flatten() {
+                    if node["id"].as_str() == Some(&old_id) {
+                        node["id"] = final_id.clone().into();
+                    }
+                }
+                Ok(serde_json::to_string(&source)?)
+            })();
+            match renamed_source {
+                Ok(source) => self.pending_source = Some(source),
+                Err(error) => {
+                    self.save_error = Some(error.to_string());
+                    return;
+                }
+            }
+        }
 
         for node in &mut self.data.nodes {
             match node {
@@ -1481,6 +1617,171 @@ mod tests {
     use super::*;
 
     #[test]
+    fn raw_source_preserves_formats_prose_and_unsaved_drafts() {
+        let dir = tempfile::tempdir().unwrap();
+        for (extension, original) in [
+            ("dot", "digraph G {\nA -> B;\n}\n"),
+            ("md", "# Old\n```mermaid\ngraph TD\nA --> B\n```\n"),
+            ("puml", "@startuml\nA --> B\n@enduml\n"),
+        ] {
+            let path = dir.path().join(format!("diagram.{extension}"));
+            std::fs::write(&path, original).unwrap();
+            let mut state = PinstarState::load(&path).unwrap();
+            state.sync_to_raw_editor();
+            assert!(!state.raw_editor.lines().join("\n").starts_with('{'));
+            let edited = original.replace("# Old", "# New");
+            state.raw_editor.select_all();
+            state.raw_editor.insert_str(&edited);
+            state.sync_to_raw_editor();
+            assert_eq!(state.raw_editor.lines().join("\n"), edited);
+            state.sync_from_raw_editor().unwrap();
+            assert_eq!(state.data.edges.len(), 1);
+            if extension == "md" {
+                assert!(std::fs::read_to_string(&path).unwrap().starts_with("# New"));
+            }
+        }
+    }
+
+    #[test]
+    fn raw_sync_propagates_save_failure_and_keeps_draft() {
+        let (_dir, mut state) = canvas_with(vec![], vec![]);
+        state.set_save_handler(|_, _, _| anyhow::bail!("disk full"));
+        state.raw_editor.select_all();
+        state
+            .raw_editor
+            .insert_str(r#"{"nodes":[],"edges":[],"custom":"draft"}"#);
+        assert!(
+            state
+                .sync_from_raw_editor()
+                .unwrap_err()
+                .to_string()
+                .contains("disk full")
+        );
+        assert!(state.has_unsaved_changes());
+        assert!(state.raw_editor.lines().join("\n").contains("draft"));
+        state.raw_editor.insert_str(" invalid new edit");
+        state.set_save_handler(|path, _, after| crate::atomic_write(path, after));
+        assert!(
+            state
+                .save()
+                .unwrap_err()
+                .to_string()
+                .contains("Source edits pending")
+        );
+        assert!(
+            state
+                .raw_editor
+                .lines()
+                .join("\n")
+                .contains("invalid new edit")
+        );
+        assert!(
+            !std::fs::read_to_string(&state.path)
+                .unwrap()
+                .contains("draft")
+        );
+    }
+
+    #[test]
+    fn concurrent_writer_lock_retains_pending_changes_until_retry() {
+        let (_dir, mut state) = canvas_with(vec![], vec![]);
+        let lock = std::fs::File::open(&state.path).unwrap();
+        lock.lock().unwrap();
+        state.add_text_node(0.0, 0.0);
+        assert!(state.last_save_failed());
+        assert!(state.has_unsaved_changes());
+        drop(lock);
+        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 0);
+        state.save().unwrap();
+        assert_eq!(PinstarState::load(&state.path).unwrap().data.nodes.len(), 1);
+    }
+
+    #[test]
+    fn rename_rejects_duplicates_and_invalid_flowchart_ids() {
+        let (_dir, mut state) = canvas_with(
+            vec![text_node("a", 1.0, 1.0), text_node("b", 200.0, 1.0)],
+            vec![],
+        );
+        state.selection.select_only("a".into());
+        state.rename_node_id("b".into());
+        assert_eq!(state.data.nodes[0].id(), "a");
+        assert!(state.take_save_error().is_some());
+        state.format = SupportedFormat::Dot;
+        state.rename_node_id("invalid ID".into());
+        assert_eq!(state.data.nodes[0].id(), "a");
+        state.rename_node_id("GRAPH".into());
+        assert_eq!(state.data.nodes[0].id(), "a");
+    }
+
+    #[test]
+    fn unchanged_save_keeps_original_bytes_and_conflicts_retain_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        let original = "{ \"nodes\": [], \"edges\": [], \"custom\": 42 }\n";
+        std::fs::write(&path, original).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.save().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!state.has_unsaved_changes());
+        std::fs::write(&path, "external edit").unwrap();
+        state.add_text_node(20.0, 20.0);
+        assert!(state.last_save_failed());
+        assert!(state.has_unsaved_changes());
+        assert_eq!(state.data.nodes.len(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "external edit");
+    }
+
+    #[test]
+    fn saves_keep_unmodeled_canvas_fields_without_restoring_deleted_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        let original = r#"{"custom":42,"nodes":[{"type":"text","id":"a","x":1,"y":1,"width":100,"height":50,"text":"hello","title":"remove","custom":true}],"edges":[{"id":"e","fromNode":"a","toNode":"a","fromEnd":"none","toEnd":"none","title":"edge metadata"}]}"#;
+        std::fs::write(&path, original).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.data.nodes[0].set_text("changed".into());
+        state.data.nodes[0].set_title(None);
+        state.save().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["custom"], 42);
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        assert!(saved["nodes"][0].get("title").is_none());
+        assert_eq!(saved["edges"][0]["toEnd"], "none");
+        assert_eq!(saved["edges"][0]["title"], "edge metadata");
+        state.selection.select_only("a".into());
+        state.rename_node_id("renamed".into());
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["id"], "renamed");
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        state.undo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["id"], "a");
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        state.redo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["id"], "renamed");
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        state.record_undo_state();
+        state.data.edges.clear();
+        state.save().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["edges"], serde_json::json!([]));
+        state.undo().unwrap();
+        state.selection.select_only("renamed".into());
+        state.delete_selected_node();
+        state.undo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        assert_eq!(saved["edges"][0]["toEnd"], "none");
+        assert_eq!(saved["edges"][0]["title"], "edge metadata");
+    }
+
+    #[test]
     fn host_saves_validate_original_source_and_reload_resets_it() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("host.canvas");
@@ -1494,6 +1795,7 @@ mod tests {
             );
             crate::atomic_write(target, after)
         });
+        state.data.orientation = crate::data::DiagramOrientation::LeftRight;
         state.save().unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, original).unwrap();

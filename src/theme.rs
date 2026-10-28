@@ -97,14 +97,12 @@ fn derive_color(base: Color, delta: i16) -> Option<Color> {
 }
 
 pub fn parse_hex_color(s: &str) -> Option<Color> {
-    let s = s.strip_prefix('#')?;
-    if s.len() == 6 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        return Some(Color::Rgb(r, g, b));
+    let hex = s.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
     }
-    None
+    let rgb = u32::from_str_radix(hex, 16).ok()?;
+    Some(Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
 }
 
 /// Resolve a node color attribute: `#rrggbb`, a 1-based palette index, a
@@ -167,21 +165,10 @@ pub fn move_textarea_cursor_to_mouse(
     mouse_col: u16,
     mouse_row: u16,
 ) {
-    if textarea.lines().is_empty() || body_inner.width == 0 || body_inner.height == 0 {
-        return;
-    }
-
     let (scroll_row, scroll_col) = get_textarea_scroll(textarea);
-
-    let row = mouse_row.saturating_sub(body_inner.y) as usize + scroll_row;
-    let col = mouse_col.saturating_sub(body_inner.x) as usize + scroll_col;
-
-    let max_row = textarea.lines().len().saturating_sub(1);
-    let target_row = row.min(max_row);
-    let max_col = textarea.lines()[target_row].chars().count();
-    let target_col = col.min(max_col);
-
-    textarea.move_cursor(CursorMove::Jump(target_row as u16, target_col as u16));
+    move_textarea_cursor_to_mouse_scrolled(
+        textarea, body_inner, mouse_col, mouse_row, scroll_row, scroll_col,
+    );
 }
 
 pub fn move_textarea_cursor_to_mouse_scrolled(
@@ -197,29 +184,13 @@ pub fn move_textarea_cursor_to_mouse_scrolled(
     }
     let row = mouse_row.saturating_sub(body_inner.y) as usize + scroll_row;
     let col = mouse_col.saturating_sub(body_inner.x) as usize + scroll_col;
-    let max_row = textarea.lines().len().saturating_sub(1);
-    let target_row = row.min(max_row);
-    let max_col = textarea.lines()[target_row].chars().count();
-    let target_col = col.min(max_col);
-    textarea.move_cursor(CursorMove::Jump(target_row as u16, target_col as u16));
+    let target = textarea.screen_to_data(row, col);
+    textarea.move_cursor(CursorMove::Jump(target.0 as u16, target.1 as u16));
 }
 
 pub fn get_textarea_scroll(textarea: &TextArea) -> (usize, usize) {
-    let mut scroll_row = 0;
-    let mut scroll_col = 0;
-
-    let debug_str = format!("{textarea:?}");
-    if let Some(start) = debug_str.find("viewport: Viewport(") {
-        let after_start = &debug_str[start + "viewport: Viewport(".len()..];
-        if let Some(end) = after_start.find(')') {
-            let number_str = &after_start[..end];
-            if let Ok(number) = number_str.parse::<u64>() {
-                scroll_row = ((number >> 16) & 0xFFFF) as usize;
-                scroll_col = (number & 0xFFFF) as usize;
-            }
-        }
-    }
-    (scroll_row, scroll_col)
+    let (row, col) = textarea.scroll_offset();
+    (usize::from(row), usize::from(col))
 }
 
 pub fn line_number_gutter(
@@ -277,5 +248,46 @@ pub fn fill_cursor_line_bg(frame: &mut Frame, editor: &TextArea, area: Rect, bg:
         if let Some(cell) = buf.cell_mut((x, y)) {
             cell.set_bg(bg);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui_textarea::WrapMode;
+
+    #[test]
+    fn colors_reject_unicode_without_panicking() {
+        assert_eq!(parse_hex_color("#💥ab"), None);
+        assert_eq!(
+            parse_hex_color("#abCDef"),
+            Some(Color::Rgb(0xab, 0xcd, 0xef))
+        );
+        assert_eq!(parse_hex_color("#gg0000"), None);
+    }
+
+    #[test]
+    fn mouse_uses_wrapped_and_wide_character_positions() {
+        let mut textarea = TextArea::from(["abcdefghijkl"]);
+        textarea.set_wrap_mode(WrapMode::WordOrGlyph);
+        let mut terminal = Terminal::new(TestBackend::new(4, 5)).unwrap();
+        terminal
+            .draw(|frame| frame.render_widget(&textarea, frame.area()))
+            .unwrap();
+        move_textarea_cursor_to_mouse(&mut textarea, Rect::new(0, 0, 4, 5), 0, 1);
+        assert_eq!(textarea.cursor(), (0, 4));
+        let mut textarea = TextArea::from(["界x"]);
+        terminal
+            .draw(|frame| frame.render_widget(&textarea, frame.area()))
+            .unwrap();
+        move_textarea_cursor_to_mouse(&mut textarea, Rect::new(0, 0, 4, 5), 2, 0);
+        assert_eq!(textarea.cursor(), (0, 1));
+    }
+
+    #[test]
+    fn source_text_cannot_spoof_scroll_offset() {
+        let textarea = TextArea::from(["viewport: Viewport(65536)"]);
+        assert_eq!(get_textarea_scroll(&textarea), (0, 0));
     }
 }

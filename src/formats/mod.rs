@@ -6,6 +6,78 @@ use crate::data::{CanvasData, CanvasNode};
 use anyhow::Result;
 use std::path::Path;
 
+fn parse_layout(x: &str, y: &str, width: &str, height: &str) -> Result<(f64, f64, f64, f64)> {
+    let (x, y, width, height): (f64, f64, f64, f64) =
+        (x.parse()?, y.parse()?, width.parse()?, height.parse()?);
+    validate_layout(x, y, width, height)?;
+    Ok((x, y, width, height))
+}
+
+fn validate_layout(x: f64, y: f64, width: f64, height: f64) -> Result<()> {
+    anyhow::ensure!(
+        [x, y, width, height].iter().all(|value| value.is_finite()) && width > 0.0 && height > 0.0,
+        "Layout requires finite coordinates and positive dimensions"
+    );
+    Ok(())
+}
+
+pub(crate) fn valid_node_id(id: &str, format: SupportedFormat) -> bool {
+    if format == SupportedFormat::Canvas {
+        return !id.is_empty();
+    }
+    !id.is_empty()
+        && (format != SupportedFormat::Dot
+            || !id.as_bytes()[0].is_ascii_digit()
+            || id.bytes().all(|ch| ch.is_ascii_digit()))
+        && id.bytes().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || ch == b'_'
+                || (ch == b'-' && format != SupportedFormat::Dot)
+        })
+        && !match format {
+            SupportedFormat::Mermaid => [
+                "end",
+                "graph",
+                "flowchart",
+                "subgraph",
+                "direction",
+                "class",
+                "classDef",
+                "style",
+                "linkStyle",
+                "click",
+            ]
+            .contains(&id),
+            SupportedFormat::Dot => ["node", "edge", "graph", "digraph", "strict", "subgraph"]
+                .iter()
+                .any(|word| id.eq_ignore_ascii_case(word)),
+            _ => false,
+        }
+}
+
+fn validate_flowchart(data: &CanvasData, format: SupportedFormat) -> Result<()> {
+    let mut ids = std::collections::HashSet::new();
+    for node in &data.nodes {
+        anyhow::ensure!(
+            matches!(node, CanvasNode::Text(_))
+                && valid_node_id(node.id(), format)
+                && ids.insert(node.id()),
+            "Unsupported or duplicate flowchart node ID/type: {}",
+            node.id()
+        );
+        let (x, y) = node.pos();
+        let (width, height) = node.size();
+        validate_layout(x, y, width, height)?;
+    }
+    for edge in &data.edges {
+        anyhow::ensure!(
+            ids.contains(edge.from_node.as_str()) && ids.contains(edge.to_node.as_str()),
+            "Connection references a missing node"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SupportedFormat {
     Canvas,
@@ -75,7 +147,40 @@ pub fn save_to_format(
     write_layout: bool,
 ) -> Result<String> {
     match format {
-        SupportedFormat::Canvas => serde_json::to_string_pretty(data).map_err(Into::into),
+        SupportedFormat::Canvas => {
+            let mut output = serde_json::to_value(data)?;
+            if !original_content.trim().is_empty() {
+                let mut original: serde_json::Value = serde_json::from_str(original_content)?;
+                for collection in ["nodes", "edges"] {
+                    let previous: std::collections::HashMap<_, _> = original[collection]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|item| Some((item["id"].as_str()?, item)))
+                        .collect();
+                    for item in output[collection].as_array_mut().into_iter().flatten() {
+                        if let Some(old) = item["id"].as_str().and_then(|id| previous.get(id))
+                            && old["type"] == item["type"]
+                            && let Some(mut fields) = old.as_object().cloned()
+                        {
+                            // Absent titles are deliberate deletions; other unmodeled fields survive.
+                            if collection == "nodes"
+                                && matches!(item["type"].as_str(), Some("text" | "file" | "link"))
+                            {
+                                fields.remove("title");
+                            }
+                            fields.extend(item.as_object().cloned().unwrap_or_default());
+                            *item = serde_json::Value::Object(fields);
+                        }
+                    }
+                }
+                if let Some(fields) = original.as_object_mut() {
+                    fields.extend(output.as_object().cloned().unwrap_or_default());
+                    output = original;
+                }
+            }
+            serde_json::to_string_pretty(&output).map_err(Into::into)
+        }
         SupportedFormat::Mermaid => mermaid::serialize(data, original_content, write_layout),
         SupportedFormat::Dot => dot::serialize(data, write_layout),
         SupportedFormat::PlantUml => plantuml::serialize(data, write_layout),

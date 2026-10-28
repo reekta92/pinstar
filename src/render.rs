@@ -542,20 +542,54 @@ fn draw_braille_segment(
     style: EdgeStyle,
     color: Color,
 ) {
-    let mut current_x = x1;
-    let mut current_y = y1;
-    let dist = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
-    let steps = (dist * 4.0) as usize;
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    if ![x1, y1, x2, y2, dx, dy]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return;
+    }
+    // Clip before sampling so distant Canvas edges cost only visible pixels.
+    let (mut start, mut end): (f64, f64) = (0.0, 1.0);
+    for (direction, distance) in [
+        (-dx, x1 - view_left),
+        (dx, view_right - x1),
+        (-dy, y1 - view_top),
+        (dy, view_bottom - y1),
+    ] {
+        if direction == 0.0 {
+            if distance < 0.0 {
+                return;
+            }
+        } else {
+            let position = distance / direction;
+            if direction < 0.0 {
+                start = start.max(position);
+            } else {
+                end = end.min(position);
+            }
+            if start > end {
+                return;
+            }
+        }
+    }
+    let mut current_x = (x1 + dx * start).clamp(view_left, view_right);
+    let mut current_y = (y1 + dy * start).clamp(view_top, view_bottom);
+    let clipped_x = (x1 + dx * end).clamp(view_left, view_right) - current_x;
+    let clipped_y = (y1 + dy * end).clamp(view_top, view_bottom) - current_y;
+    let steps = (clipped_x.hypot(clipped_y) * 4.0) as usize;
     if steps == 0 {
         return;
     }
-    let ddx = (x2 - x1) / steps as f64;
-    let ddy = (y2 - y1) / steps as f64;
+    let ddx = clipped_x / steps as f64;
+    let ddy = clipped_y / steps as f64;
+    let phase = (dx.hypot(dy) * 4.0 * start).rem_euclid(16.0) as usize;
     for step in 0..=steps {
         let draw = match style {
             EdgeStyle::Solid | EdgeStyle::Thick => true,
-            EdgeStyle::Dashed => step % 16 < 8,
-            EdgeStyle::Dotted => step % 8 == 0,
+            EdgeStyle::Dashed => (step + phase) % 16 < 8,
+            EdgeStyle::Dotted => (step + phase).is_multiple_of(8),
         };
         if draw
             && current_x >= view_left
@@ -672,6 +706,19 @@ fn is_image_ext(path: &str) -> bool {
     )
 }
 
+#[cfg(feature = "images")]
+fn resolve_image_path(canvas: &std::path::Path, file: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(file);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        canvas
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(path)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_canvas_nodes(
     frame: &mut Frame,
@@ -701,6 +748,9 @@ fn render_canvas_nodes(
         view_bottom,
     };
     let proj: Vec<Proj> = view.project_nodes().collect();
+
+    #[cfg(feature = "images")]
+    state.image_cache.begin_frame();
 
     for (idx, p) in proj.iter().enumerate() {
         if p.is_group || !p.on_screen {
@@ -823,7 +873,7 @@ fn render_canvas_nodes(
                     CanvasNode::File(n) => n.file.clone(),
                     _ => String::new(),
                 };
-                let key = std::path::PathBuf::from(&file_path);
+                let key = resolve_image_path(&state.path, &file_path);
                 if let Some(tx) = &state.image_decode_tx {
                     state.image_cache.request(key.clone(), 2048, tx);
                 }
@@ -1141,7 +1191,9 @@ fn render_flowchart_edges(
                                  vert_char: char| {
                 if y1 == y2 {
                     let (start, end) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-                    for x in start..=end {
+                    for x in start.max(i32::from(canvas_area.left()))
+                        ..=end.min(i32::from(canvas_area.right()) - 1)
+                    {
                         if x < canvas_area.left() as i32
                             || x >= canvas_area.right() as i32
                             || y1 < canvas_area.top() as i32
@@ -1151,13 +1203,13 @@ fn render_flowchart_edges(
                         }
                         let ch = match effective_style {
                             EdgeStyle::Dotted => {
-                                if (x - start) % 4 != 0 {
+                                if (i64::from(x) - i64::from(start)) % 4 != 0 {
                                     continue;
                                 }
                                 horz_char
                             }
                             EdgeStyle::Dashed => {
-                                if (x - start) % 8 >= 4 {
+                                if (i64::from(x) - i64::from(start)) % 8 >= 4 {
                                     continue;
                                 }
                                 horz_char
@@ -1170,7 +1222,9 @@ fn render_flowchart_edges(
                     }
                 } else if x1 == x2 {
                     let (start, end) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
-                    for y in start..=end {
+                    for y in start.max(i32::from(canvas_area.top()))
+                        ..=end.min(i32::from(canvas_area.bottom()) - 1)
+                    {
                         if x1 < canvas_area.left() as i32
                             || x1 >= canvas_area.right() as i32
                             || y < canvas_area.top() as i32
@@ -1180,13 +1234,13 @@ fn render_flowchart_edges(
                         }
                         let ch = match effective_style {
                             EdgeStyle::Dotted => {
-                                if (y - start) % 4 != 0 {
+                                if (i64::from(y) - i64::from(start)) % 4 != 0 {
                                     continue;
                                 }
                                 vert_char
                             }
                             EdgeStyle::Dashed => {
-                                if (y - start) % 8 >= 4 {
+                                if (i64::from(y) - i64::from(start)) % 8 >= 4 {
                                     continue;
                                 }
                                 vert_char
@@ -1229,7 +1283,7 @@ fn render_flowchart_edges(
             let ey = sty.round() as i32;
 
             if is_horizontal_exit {
-                let mid_x = (sx + ex) / 2;
+                let mid_x = ((i64::from(sx) + i64::from(ex)) / 2) as i32;
                 draw_box_line(buf, sx, sy, mid_x, sy, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, mid_x, sy, mid_x, ey, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, mid_x, ey, ex, ey, '\u{2500}', '\u{2502}');
@@ -1251,13 +1305,13 @@ fn render_flowchart_edges(
                 }
 
                 let (arrow_c, arrow_col, arrow_row) = if ex > sx {
-                    ('\u{25b6}', ex - 1, ey)
+                    ('\u{25b6}', ex.saturating_sub(1), ey)
                 } else {
-                    ('\u{25c0}', ex + 1, ey)
+                    ('\u{25c0}', ex.saturating_add(1), ey)
                 };
                 draw_arrow(buf, arrow_c, arrow_col, arrow_row);
             } else {
-                let mid_y = (sy + ey) / 2;
+                let mid_y = ((i64::from(sy) + i64::from(ey)) / 2) as i32;
                 draw_box_line(buf, sx, sy, sx, mid_y, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, sx, mid_y, ex, mid_y, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, ex, mid_y, ex, ey, '\u{2500}', '\u{2502}');
@@ -1279,9 +1333,9 @@ fn render_flowchart_edges(
                 }
 
                 let (arrow_c, arrow_col, arrow_row) = if ey > sy {
-                    ('\u{25bc}', ex, ey - 1)
+                    ('\u{25bc}', ex, ey.saturating_sub(1))
                 } else {
-                    ('\u{25b2}', ex, ey + 1)
+                    ('\u{25b2}', ex, ey.saturating_add(1))
                 };
                 draw_arrow(buf, arrow_c, arrow_col, arrow_row);
             }
@@ -1978,6 +2032,9 @@ fn render_hint_line(
     } else if state.resizing_node_id.is_some() {
         hint_text = "RESIZE MODE: Drag mouse to resize, Right-click to confirm".to_string();
     }
+    if !state.footer_hint.is_empty() {
+        hint_text.clone_from(&state.footer_hint);
+    }
 
     let mut spans = Vec::new();
     let ext_label = if state.ext_editor_enabled {
@@ -2229,6 +2286,102 @@ fn is_generated_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn canvas_edges_sample_only_the_visible_segment() {
+        use ratatui::{buffer::Buffer, layout::Rect, style::Color};
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+        super::draw_braille_segment(
+            &mut buffer,
+            -1e12,
+            12.0,
+            1e12,
+            12.0,
+            0.0,
+            80.0,
+            0.0,
+            24.0,
+            crate::data::EdgeStyle::Solid,
+            Color::White,
+        );
+        assert!(buffer.content.iter().any(|cell| cell.symbol() != " "));
+        let before = buffer.clone();
+        super::draw_braille_segment(
+            &mut buffer,
+            -1e12,
+            -10.0,
+            1e12,
+            -10.0,
+            0.0,
+            80.0,
+            0.0,
+            24.0,
+            crate::data::EdgeStyle::Solid,
+            Color::White,
+        );
+        assert_eq!(buffer, before);
+    }
+    #[cfg(feature = "images")]
+    #[test]
+    fn image_paths_resolve_against_canvas_directory() {
+        use std::path::{Path, PathBuf};
+        assert_eq!(
+            super::resolve_image_path(Path::new("notes/diagram.canvas"), "assets/photo.png"),
+            PathBuf::from("notes/assets/photo.png")
+        );
+        let absolute = std::env::temp_dir().join("photo.png");
+        assert_eq!(
+            super::resolve_image_path(
+                Path::new("notes/diagram.canvas"),
+                absolute.to_str().unwrap()
+            ),
+            absolute
+        );
+    }
+    #[test]
+    fn distant_flowchart_edges_remain_bounded() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("distant.dot");
+        std::fs::write(&path, "digraph G {\n// pinstar_layout: A 1000000000000 0 200 100\n// pinstar_layout: B 2000000000000 0 200 100\nA -> B;\n}\n").unwrap();
+        let mut state = crate::PinstarState::load(&path).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for zoom in [0.1, 1000000000.0] {
+            state.zoom = zoom;
+            terminal
+                .draw(|frame| {
+                    super::draw_pinstar_view(
+                        frame,
+                        &mut state,
+                        &crate::ThemeColors::default(),
+                        frame.area(),
+                        None,
+                    )
+                })
+                .unwrap();
+        }
+        state.data.nodes[0] = crate::data::CanvasNode::Text(crate::data::TextNode {
+            id: "A".into(),
+            x: -1e12,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+            text: "A".into(),
+            title: None,
+            color: None,
+            shape: Default::default(),
+        });
+        terminal
+            .draw(|frame| {
+                super::draw_pinstar_view(
+                    frame,
+                    &mut state,
+                    &crate::ThemeColors::default(),
+                    frame.area(),
+                    None,
+                )
+            })
+            .unwrap();
+    }
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;

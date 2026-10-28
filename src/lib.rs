@@ -84,27 +84,95 @@ pub const COLOR_PICKER_PALETTE: &[(&str, &str, Color)] = &[
 /// Write `content` to `path` atomically (temp file in the same directory +
 /// rename), so a crash mid-write never truncates the canvas file.
 pub fn atomic_write(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+    let target = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => path.canonicalize()?,
+        Ok(_) => path.to_path_buf(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(error) => return Err(error.into()),
+    };
+    let path = target.as_path();
+    let permissions = match std::fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = parent.join(format!(
         ".{}.{}.tmp",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         uuid::Uuid::new_v4()
     ));
-    std::fs::write(&tmp, content).with_context(|| format!("failed to write {}", tmp.display()))?;
-
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        let f = std::fs::File::open(&tmp).context("failed to open temp file for syncing")?;
-        f.sync_all().context("failed to sync temp file")?;
-        drop(f);
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&tmp)
+        .with_context(|| format!("failed to create {}", tmp.display()))?;
+    let result = (|| -> Result<()> {
+        file.write_all(content.as_bytes())?;
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+        file.sync_all().context("failed to sync temp file")?;
+        drop(file);
+        std::fs::rename(&tmp, path).with_context(|| {
+            format!(
+                "failed to rename temp file {} to {}",
+                tmp.display(),
+                path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_write_replaces_contents_and_cleans_up_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        atomic_write(&path, "before").unwrap();
+        atomic_write(&path, "after").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "after");
+        let directory = dir.path().join("directory");
+        std::fs::create_dir(&directory).unwrap();
+        assert!(atomic_write(&directory, "cannot replace directory").is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 
-    std::fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "failed to rename temp file {} to {}",
-            tmp.display(),
-            path.display()
-        )
-    })?;
-    Ok(())
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_private_permissions_and_symlinks() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.canvas");
+        std::fs::write(&target, "before").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.path().join("link.canvas");
+        symlink("target.canvas", &link).unwrap();
+        atomic_write(&link, "after").unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "after");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }
