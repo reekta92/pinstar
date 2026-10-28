@@ -76,6 +76,8 @@ pub struct PinstarState {
     saved_layout_override: bool,
     pending_source: Option<String>,
     raw_editor_source: String,
+    undo_sources: Vec<String>,
+    redo_sources: Vec<String>,
     save_handler: Option<SaveHandler>,
     save_error: Option<String>,
     save_failed: bool,
@@ -174,6 +176,8 @@ impl PinstarState {
             saved_layout_override: has_layout_override,
             pending_source: None,
             raw_editor_source: content.lines().collect::<Vec<_>>().join("\n"),
+            undo_sources: Vec::new(),
+            redo_sources: Vec::new(),
             save_handler: None,
             save_error: None,
             save_failed: false,
@@ -339,11 +343,17 @@ impl PinstarState {
             data: self.data.clone(),
             has_layout_override: self.has_layout_override,
         };
+        self.undo_sources
+            .resize_with(self.undo_stack.len(), || self.source.clone());
+        self.undo_sources
+            .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
         self.undo_stack.push(snapshot);
         if self.undo_stack.len() > 100 {
             self.undo_stack.remove(0);
+            self.undo_sources.remove(0);
         }
         self.redo_stack.clear();
+        self.redo_sources.clear();
     }
 
     fn prune_selection_after_restore(&mut self) {
@@ -364,12 +374,26 @@ impl PinstarState {
     }
 
     pub fn undo(&mut self) -> Result<()> {
+        anyhow::ensure!(
+            self.raw_editor.lines().join("\n") == self.raw_editor_source
+                || self.pending_source.is_some(),
+            "Apply pending source edits before undo"
+        );
         if let Some(snapshot) = self.undo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
                 has_layout_override: self.has_layout_override,
             };
+            self.redo_sources
+                .resize_with(self.redo_stack.len(), || self.source.clone());
+            self.redo_sources
+                .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
             self.redo_stack.push(current);
+            self.pending_source = Some(
+                self.undo_sources
+                    .pop()
+                    .unwrap_or_else(|| self.source.clone()),
+            );
 
             self.data = snapshot.data;
             self.has_layout_override = snapshot.has_layout_override;
@@ -381,12 +405,26 @@ impl PinstarState {
     }
 
     pub fn redo(&mut self) -> Result<()> {
+        anyhow::ensure!(
+            self.raw_editor.lines().join("\n") == self.raw_editor_source
+                || self.pending_source.is_some(),
+            "Apply pending source edits before redo"
+        );
         if let Some(snapshot) = self.redo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
                 has_layout_override: self.has_layout_override,
             };
+            self.undo_sources
+                .resize_with(self.undo_stack.len(), || self.source.clone());
+            self.undo_sources
+                .push(self.pending_source.as_ref().unwrap_or(&self.source).clone());
             self.undo_stack.push(current);
+            self.pending_source = Some(
+                self.redo_sources
+                    .pop()
+                    .unwrap_or_else(|| self.source.clone()),
+            );
 
             self.data = snapshot.data;
             self.has_layout_override = snapshot.has_layout_override;
@@ -1661,11 +1699,30 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["nodes"][0]["id"], "renamed");
         assert_eq!(saved["nodes"][0]["custom"], true);
+        state.undo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["id"], "a");
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        state.redo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["id"], "renamed");
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        state.record_undo_state();
         state.data.edges.clear();
         state.save().unwrap();
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["edges"], serde_json::json!([]));
+        state.undo().unwrap();
+        state.selection.select_only("renamed".into());
+        state.delete_selected_node();
+        state.undo().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        assert_eq!(saved["edges"][0]["toEnd"], "none");
     }
 
     #[test]
