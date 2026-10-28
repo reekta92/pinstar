@@ -542,20 +542,54 @@ fn draw_braille_segment(
     style: EdgeStyle,
     color: Color,
 ) {
-    let mut current_x = x1;
-    let mut current_y = y1;
-    let dist = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
-    let steps = (dist * 4.0) as usize;
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    if ![x1, y1, x2, y2, dx, dy]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return;
+    }
+    // Clip before sampling so distant Canvas edges cost only visible pixels.
+    let (mut start, mut end): (f64, f64) = (0.0, 1.0);
+    for (direction, distance) in [
+        (-dx, x1 - view_left),
+        (dx, view_right - x1),
+        (-dy, y1 - view_top),
+        (dy, view_bottom - y1),
+    ] {
+        if direction == 0.0 {
+            if distance < 0.0 {
+                return;
+            }
+        } else {
+            let position = distance / direction;
+            if direction < 0.0 {
+                start = start.max(position);
+            } else {
+                end = end.min(position);
+            }
+            if start > end {
+                return;
+            }
+        }
+    }
+    let mut current_x = (x1 + dx * start).clamp(view_left, view_right);
+    let mut current_y = (y1 + dy * start).clamp(view_top, view_bottom);
+    let clipped_x = (x1 + dx * end).clamp(view_left, view_right) - current_x;
+    let clipped_y = (y1 + dy * end).clamp(view_top, view_bottom) - current_y;
+    let steps = (clipped_x.hypot(clipped_y) * 4.0) as usize;
     if steps == 0 {
         return;
     }
-    let ddx = (x2 - x1) / steps as f64;
-    let ddy = (y2 - y1) / steps as f64;
+    let ddx = clipped_x / steps as f64;
+    let ddy = clipped_y / steps as f64;
+    let phase = (dx.hypot(dy) * 4.0 * start).rem_euclid(16.0) as usize;
     for step in 0..=steps {
         let draw = match style {
             EdgeStyle::Solid | EdgeStyle::Thick => true,
-            EdgeStyle::Dashed => step % 16 < 8,
-            EdgeStyle::Dotted => step % 8 == 0,
+            EdgeStyle::Dashed => (step + phase) % 16 < 8,
+            EdgeStyle::Dotted => (step + phase).is_multiple_of(8),
         };
         if draw
             && current_x >= view_left
@@ -2252,6 +2286,40 @@ fn is_generated_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn canvas_edges_sample_only_the_visible_segment() {
+        use ratatui::{buffer::Buffer, layout::Rect, style::Color};
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+        super::draw_braille_segment(
+            &mut buffer,
+            -1e12,
+            12.0,
+            1e12,
+            12.0,
+            0.0,
+            80.0,
+            0.0,
+            24.0,
+            crate::data::EdgeStyle::Solid,
+            Color::White,
+        );
+        assert!(buffer.content.iter().any(|cell| cell.symbol() != " "));
+        let before = buffer.clone();
+        super::draw_braille_segment(
+            &mut buffer,
+            -1e12,
+            -10.0,
+            1e12,
+            -10.0,
+            0.0,
+            80.0,
+            0.0,
+            24.0,
+            crate::data::EdgeStyle::Solid,
+            Color::White,
+        );
+        assert_eq!(buffer, before);
+    }
     #[cfg(feature = "images")]
     #[test]
     fn image_paths_resolve_against_canvas_directory() {
