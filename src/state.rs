@@ -1705,6 +1705,8 @@ mod tests {
         state.format = SupportedFormat::Dot;
         state.rename_node_id("invalid ID".into());
         assert_eq!(state.data.nodes[0].id(), "a");
+        state.rename_node_id("GRAPH".into());
+        assert_eq!(state.data.nodes[0].id(), "a");
     }
 
     #[test]

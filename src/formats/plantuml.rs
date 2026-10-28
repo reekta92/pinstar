@@ -169,6 +169,10 @@ pub fn parse(content: &str) -> Result<CanvasData> {
         // 5. Standalone Identifier
         let clean_id = trimmed.trim_matches(|c| c == ';' || c == ':').trim();
         if id_pattern.is_match(clean_id) {
+            ensure!(
+                !["start", "stop", "end", "kill", "detach"].contains(&clean_id),
+                "PlantUML activity syntax is unsupported"
+            );
             nodes_map
                 .entry(clean_id.to_string())
                 .or_insert_with(|| clean_id.to_string());
@@ -287,6 +291,7 @@ mod tests {
     fn unsupported_activity_and_incomplete_diagrams_are_rejected() {
         for source in [
             "@startuml\nstart\n:Do work;\nstop\n@enduml",
+            "@startuml\nstart\nstop\n@enduml",
             "@startuml\nclass A {\nfield\n}\n@enduml",
             "@startuml\nA --> B",
             "@startuml\nA --> B --> C\n@enduml",

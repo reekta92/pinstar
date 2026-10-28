@@ -48,9 +48,9 @@ pub(crate) fn valid_node_id(id: &str, format: SupportedFormat) -> bool {
                 "click",
             ]
             .contains(&id),
-            SupportedFormat::Dot => {
-                ["node", "edge", "graph", "digraph", "strict", "subgraph"].contains(&id)
-            }
+            SupportedFormat::Dot => ["node", "edge", "graph", "digraph", "strict", "subgraph"]
+                .iter()
+                .any(|word| id.eq_ignore_ascii_case(word)),
             _ => false,
         }
 }
