@@ -75,7 +75,36 @@ pub fn save_to_format(
     write_layout: bool,
 ) -> Result<String> {
     match format {
-        SupportedFormat::Canvas => serde_json::to_string_pretty(data).map_err(Into::into),
+        SupportedFormat::Canvas => {
+            let mut output = serde_json::to_value(data)?;
+            if !original_content.trim().is_empty() {
+                let mut original: serde_json::Value = serde_json::from_str(original_content)?;
+                for collection in ["nodes", "edges"] {
+                    let previous: std::collections::HashMap<_, _> = original[collection]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|item| Some((item["id"].as_str()?, item)))
+                        .collect();
+                    for item in output[collection].as_array_mut().into_iter().flatten() {
+                        if let Some(old) = item["id"].as_str().and_then(|id| previous.get(id))
+                            && old["type"] == item["type"]
+                            && let Some(mut fields) = old.as_object().cloned()
+                        {
+                            // Absent titles are deliberate deletions; other unmodeled fields survive.
+                            fields.remove("title");
+                            fields.extend(item.as_object().cloned().unwrap_or_default());
+                            *item = serde_json::Value::Object(fields);
+                        }
+                    }
+                }
+                if let Some(fields) = original.as_object_mut() {
+                    fields.extend(output.as_object().cloned().unwrap_or_default());
+                    output = original;
+                }
+            }
+            serde_json::to_string_pretty(&output).map_err(Into::into)
+        }
         SupportedFormat::Mermaid => mermaid::serialize(data, original_content, write_layout),
         SupportedFormat::Dot => dot::serialize(data, write_layout),
         SupportedFormat::PlantUml => plantuml::serialize(data, write_layout),

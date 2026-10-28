@@ -72,6 +72,9 @@ type SaveHandler = Box<dyn Fn(&Path, &str, &str) -> Result<()> + Send + Sync>;
 
 pub struct PinstarState {
     source: String,
+    saved_data: CanvasData,
+    saved_layout_override: bool,
+    pending_source: Option<String>,
     save_handler: Option<SaveHandler>,
     save_error: Option<String>,
     save_failed: bool,
@@ -151,7 +154,7 @@ pub(crate) enum PinstarTextField {
 impl PinstarState {
     pub fn load(path: &Path) -> Result<Self> {
         let format = formats::detect_format(path);
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(path)?;
         let data = formats::load_from_format(path, &content, format)?;
         let mut raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
         raw_editor.set_cursor_line_style(ratatui::style::Style::default());
@@ -166,6 +169,9 @@ impl PinstarState {
 
         Ok(Self {
             source: content.clone(),
+            saved_data: data.clone(),
+            saved_layout_override: has_layout_override,
+            pending_source: None,
             save_handler: None,
             save_error: None,
             save_failed: false,
@@ -259,19 +265,48 @@ impl PinstarState {
         self.save_failed
     }
 
+    /// Includes source edits that have not yet been applied to the diagram.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.data != self.saved_data
+            || self.has_layout_override != self.saved_layout_override
+            || self.pending_source.is_some()
+            || self
+                .raw_editor
+                .lines()
+                .iter()
+                .map(String::as_str)
+                .ne(self.source.lines())
+    }
+
     fn save_inner(&mut self) -> Result<()> {
-        let content = formats::save_to_format(
-            &self.data,
-            &self.source,
-            self.format,
-            self.has_layout_override,
-        )?;
+        let content = if self.data == self.saved_data
+            && self.has_layout_override == self.saved_layout_override
+            && self.pending_source.is_none()
+        {
+            self.source.clone()
+        } else {
+            formats::save_to_format(
+                &self.data,
+                self.pending_source.as_deref().unwrap_or(&self.source),
+                self.format,
+                self.has_layout_override,
+            )?
+        };
         if let Some(handler) = &self.save_handler {
             handler(&self.path, &self.source, &content)?;
         } else {
-            crate::atomic_write(&self.path, &content)?;
+            anyhow::ensure!(
+                std::fs::read_to_string(&self.path)? == self.source,
+                "File changed externally; reload before saving (pending edits retained)"
+            );
+            if content != self.source {
+                crate::atomic_write(&self.path, &content)?;
+            }
         }
         self.source = content.clone();
+        self.saved_data = self.data.clone();
+        self.saved_layout_override = self.has_layout_override;
+        self.pending_source = None;
 
         self.raw_editor = TextArea::from(content.lines().map(String::from).collect::<Vec<_>>());
         self.raw_editor
@@ -367,6 +402,9 @@ impl PinstarState {
         let content = std::fs::read_to_string(&self.path)?;
         let data = formats::load_from_format(&self.path, &content, self.format)?;
         self.source = content.clone();
+        self.saved_data = data.clone();
+        self.saved_layout_override = content.contains("pinstar_layout:");
+        self.pending_source = None;
         self.data = data;
         self.save_failed = false;
         self.save_error = None;
@@ -1481,6 +1519,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unchanged_save_keeps_original_bytes_and_conflicts_retain_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        let original = "{ \"nodes\": [], \"edges\": [], \"custom\": 42 }\n";
+        std::fs::write(&path, original).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.save().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!state.has_unsaved_changes());
+        std::fs::write(&path, "external edit").unwrap();
+        state.add_text_node(20.0, 20.0);
+        assert!(state.last_save_failed());
+        assert!(state.has_unsaved_changes());
+        assert_eq!(state.data.nodes.len(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "external edit");
+    }
+
+    #[test]
+    fn saves_keep_unmodeled_canvas_fields_without_restoring_deleted_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        let original = r#"{"custom":42,"nodes":[{"type":"text","id":"a","x":1,"y":1,"width":100,"height":50,"text":"hello","title":"remove","custom":true}],"edges":[{"id":"e","fromNode":"a","toNode":"a","fromEnd":"none","toEnd":"none"}]}"#;
+        std::fs::write(&path, original).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.data.nodes[0].set_text("changed".into());
+        state.data.nodes[0].set_title(None);
+        state.save().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["custom"], 42);
+        assert_eq!(saved["nodes"][0]["custom"], true);
+        assert!(saved["nodes"][0].get("title").is_none());
+        assert_eq!(saved["edges"][0]["toEnd"], "none");
+        state.data.edges.clear();
+        state.save().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["edges"], serde_json::json!([]));
+    }
+
+    #[test]
     fn host_saves_validate_original_source_and_reload_resets_it() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("host.canvas");
@@ -1494,6 +1573,7 @@ mod tests {
             );
             crate::atomic_write(target, after)
         });
+        state.data.orientation = crate::data::DiagramOrientation::LeftRight;
         state.save().unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, original).unwrap();

@@ -10,7 +10,7 @@ pub enum DiagramOrientation {
     DownTop,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasData {
     pub nodes: Vec<CanvasNode>,
@@ -19,7 +19,7 @@ pub struct CanvasData {
     pub orientation: DiagramOrientation,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CanvasNode {
     Text(TextNode),
@@ -39,7 +39,7 @@ pub enum NodeShape {
     Stadium,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TextNode {
     pub id: String,
@@ -55,7 +55,7 @@ pub struct TextNode {
     pub shape: NodeShape,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileNode {
     pub id: String,
@@ -70,7 +70,7 @@ pub struct FileNode {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkNode {
     pub id: String,
@@ -84,7 +84,7 @@ pub struct LinkNode {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupNode {
     pub id: String,
@@ -106,7 +106,7 @@ pub enum EdgeStyle {
     Thick,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasEdge {
     pub id: String,
