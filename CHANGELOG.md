@@ -2,6 +2,16 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.4] - 2026-10-23
+
+### Added
+
+- Allow hosts to select codecs (#35)
+- Allow hosts to select image codecs
+
+### CI
+
+- Check codec selection against paired clin revision
 ## [1.1.3] - 2026-10-21
 
 ### CI
@@ -11,6 +21,10 @@ All notable changes to pinstar are documented in this file.
 - Pin the final portable Clin consumer
 - Include Clin native Canvas identity fixes
 - Test the published-dependency Clin consumer
+
+### Release
+
+- V1.1.3
 ## [1.1.2] - 2026-10-21
 
 ### Added

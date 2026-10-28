@@ -14,7 +14,18 @@ pinstar = { version = "1.1.2", features = ["images"] }
 
 The `images` feature enables image-node support (`pinstar::image` module,
 `ratatui-image`, `lru`). Set `default-features = false` for a lighter build
-without inline images; the default feature set includes images.
+without inline images. Defaults enable `images` and `image-defaults`, retaining
+the full default format set from the `image` crate.
+
+To select codecs in an embedding application, disable Pinstar's defaults, enable
+`images`, and enable formats on your own `image` dependency. Starting with 1.1.4,
+`images` alone no longer forces the default codecs; enable `image-defaults` to
+retain that behavior explicitly.
+
+```toml
+pinstar = { version = "1.1.4", default-features = false, features = ["images"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+```
 
 ## Read-only Mermaid previews
 
