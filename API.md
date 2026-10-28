@@ -93,6 +93,7 @@ state.settings = Settings {
     enable_image_nodes: true,  // show "Add Image Node" in context menus
     image_cache_size: 64,      // LRU slots for decoded images
     rename_uses_id: false,     // false = rename title (clin), true = rename id (standalone)
+    show_hints: true,          // false when the host draws its own footer
 };
 
 // 3. In your render loop
@@ -164,6 +165,8 @@ Key methods:
 
 ```rust
 state.save()?;                           // serialize + atomic write
+let pending = state.has_unsaved_changes(); // includes unapplied raw-source edits
+let error = state.take_save_error();     // display eager-save failures in the host
 state.sync_to_raw_editor();              // data → raw editor text
 state.sync_from_raw_editor()?;           // raw editor text → data
 state.rename_node_title(new_title);      // rename selected node
@@ -183,6 +186,7 @@ pub struct Settings {
     pub enable_image_nodes: bool,  // default: false
     pub image_cache_size: usize,   // default: 32
     pub rename_uses_id: bool,      // default: false
+    pub show_hints: bool,          // default: true
 }
 ```
 
@@ -484,6 +488,22 @@ let output = pinstar::formats::save_to_format(&data, &original, format, write_la
 
 Flowchart formats auto-apply hierarchical layout when no existing positions
 are found. Canvas format uses force-directed layout for unpositioned nodes.
+
+Interactive parsers reject unsupported syntax instead of loading a partial
+diagram. This subset is narrower than the optional read-only Mermaid preview;
+see the README compatibility notes. Canvas saves merge additional JSON fields
+from the source by node/edge ID, without adding fields to the public data types.
+
+Default saves compare the loaded source with disk immediately before writing
+and reject stale state. This detects changes between save operations; it is not
+a filesystem transaction with unrelated editors. Hosts requiring stronger
+coordination can use `set_save_handler`. Host callbacks still receive every
+explicit/eager save, including unchanged content. Successful default saves skip
+replacement when nothing changed. Save failures retain pending source and data;
+hosts must display `take_save_error()` and handle errors from `save()` and
+`sync_from_raw_editor()`. Raw drafts are preserved during visual refreshes and
+must be applied before an unrelated diagram save. Hosts should suppress automatic
+reload while edits or an inline editor are active.
 
 ## Image Support (`pinstar::image`, feature = `"images"`)
 

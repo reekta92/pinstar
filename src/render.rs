@@ -1998,6 +1998,9 @@ fn render_hint_line(
     } else if state.resizing_node_id.is_some() {
         hint_text = "RESIZE MODE: Drag mouse to resize, Right-click to confirm".to_string();
     }
+    if !state.footer_hint.is_empty() {
+        hint_text.clone_from(&state.footer_hint);
+    }
 
     let mut spans = Vec::new();
     let ext_label = if state.ext_editor_enabled {

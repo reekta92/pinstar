@@ -22,11 +22,11 @@ If the file doesn't exist, pinstar creates an empty diagram in the detected form
 | `.canvas` | Obsidian Canvas JSON | Free-form, force-directed |
 | `.md`, `.mermaid` | Mermaid flowchart syntax | Hierarchical (auto) |
 | `.dot`, `.gv` | Graphviz DOT syntax | Hierarchical (auto) |
-| `.puml`, `.plantuml` | PlantUML activity syntax | Hierarchical (auto) |
+| `.puml`, `.plantuml` | PlantUML object/usecase/database syntax | Hierarchical (auto) |
 
 ## Features
 - **Multi-Format Support**: Read, write, and edit Canvas, Mermaid, DOT, and PlantUML diagrams
-- **Spec Compliance**: Full Obsidian `.canvas` JSON support (text, file, link, and group nodes)
+- **Canvas Metadata**: Edit text, file, link, and group nodes while preserving additional JSON fields
 - **Interactive TUI**: Pan, zoom, and navigate node relations inside the terminal using `ratatui`
 - **Inline Editing**: Built-in node content editing via `ratatui-textarea`
 - **Node Shapes**: Rectangle, Diamond, Circle, Cylinder, Stadium (flowchart formats)
@@ -69,6 +69,7 @@ If the file doesn't exist, pinstar creates an empty diagram in the detected form
 | Key | Action |
 |-----|--------|
 | `Ctrl+S` | Save diagram |
+| `Ctrl+Q` | Discard pending edits and quit |
 | `Ctrl+Z` | Undo last action |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo undone action |
 | `Ctrl+R` | Cycle orientation (flowchart) / Reload from disk (canvas) |
@@ -116,6 +117,10 @@ Top-Down · Left-Right · Right-Left · Bottom-Up
 Default · Red · Orange · Yellow · Green · Cyan · Blue · Purple · Magenta · White
 
 ## Known Issues / Compatibility
+- Interactive flowchart editing accepts a limited subset and rejects unsupported syntax before loading. Mermaid subgraphs, configuration, styling, and chained edges; DOT subgraphs/default attributes; and PlantUML activities/classes require another editor. The optional read-only Mermaid preview supports a broader syntax set.
+- Markdown editing changes the first Mermaid block and preserves the surrounding document and later blocks. Markdown without a supported Mermaid block is rejected.
+- Saves preserve unchanged file bytes, existing permissions, symlink targets, and additional Canvas JSON fields. External changes cause a save error; pending edits remain in memory. Normal quit retries failed saves; `Ctrl+Q` explicitly discards pending edits. Canvas `Ctrl+R` reloads disk contents and discards pending edits.
+- Image previews are limited to cache capacity (32 by default). Additional visible images use placeholders; relative paths resolve beside the canvas file.
 - Node titles may not be preserved when editing Obsidian Canvas files (Obsidian uses a different title format)
 - Diamond and Stadium shapes not available in PlantUML
 - Color editing not available in Mermaid or PlantUML syntaxes

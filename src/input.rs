@@ -1012,6 +1012,10 @@ pub fn handle_pinstar_event(
     running: &mut bool,
     area: Rect,
 ) -> bool {
+    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        *running = false;
+        return true;
+    }
     if state.show_help {
         match key.code {
             KeyCode::Tab => {
@@ -1169,7 +1173,9 @@ pub fn handle_pinstar_event(
         KeyCode::Esc | KeyCode::Char('q') => {
             if state.connection_source_id.is_some() {
                 state.connection_source_id = None;
-            } else {
+            } else if !state.has_unsaved_changes() && !state.last_save_failed()
+                || state.save().is_ok()
+            {
                 *running = false;
             }
         }
@@ -1347,6 +1353,48 @@ pub fn handle_pinstar_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_save_blocks_quit_until_retry_or_explicit_discard() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.canvas");
+        std::fs::write(&path, r#"{"nodes":[],"edges":[]}"#).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.set_save_handler(|_, _, _| anyhow::bail!("disk full"));
+        state.add_text_node(0.0, 0.0);
+        state.resizing_node_id = None;
+        let mut running = true;
+        let area = Rect::new(0, 0, 80, 24);
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            &mut running,
+            area,
+        );
+        assert!(running);
+        assert!(state.take_save_error().unwrap().contains("disk full"));
+        state.set_save_handler(|path, _, after| crate::atomic_write(path, after));
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            &mut running,
+            area,
+        );
+        assert!(!running);
+        assert_eq!(PinstarState::load(&path).unwrap().data.nodes.len(), 1);
+        state.set_save_handler(|_, _, _| anyhow::bail!("disk full"));
+        state.add_text_node(0.0, 0.0);
+        running = true;
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            &mut running,
+            area,
+        );
+        assert!(!running);
+        assert!(state.has_unsaved_changes());
+        assert_eq!(PinstarState::load(&path).unwrap().data.nodes.len(), 1);
+    }
 
     #[test]
     fn undo_restores_text_before_inline_editing() {

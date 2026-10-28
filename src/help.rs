@@ -58,6 +58,7 @@ pub fn help_content(
                     "Global",
                     vec![
                         ("Ctrl+S", "Save diagram"),
+                        ("Ctrl+Q", "Discard pending edits and quit"),
                         ("Ctrl+Z", "Undo last action"),
                         ("Ctrl+Y / Ctrl+Shift+Z", "Redo undone action"),
                         ("Ctrl+R", "Cycle orientation (flowchart) / Reload (canvas)"),
@@ -287,7 +288,10 @@ pub fn help_content(
                         ("Shapes", "Rectangle, Circle, Cylinder (no Diamond/Stadium)"),
                         ("Colors", "Not editable in PlantUML syntax"),
                         ("Edges", "Solid, Dashed, Dotted"),
-                        ("Syntax", "@startuml / @enduml activity syntax"),
+                        (
+                            "Syntax",
+                            "@startuml / @enduml object/usecase/database syntax",
+                        ),
                     ],
                 ),
             ];
