@@ -1141,7 +1141,9 @@ fn render_flowchart_edges(
                                  vert_char: char| {
                 if y1 == y2 {
                     let (start, end) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-                    for x in start..=end {
+                    for x in start.max(i32::from(canvas_area.left()))
+                        ..=end.min(i32::from(canvas_area.right()) - 1)
+                    {
                         if x < canvas_area.left() as i32
                             || x >= canvas_area.right() as i32
                             || y1 < canvas_area.top() as i32
@@ -1151,13 +1153,13 @@ fn render_flowchart_edges(
                         }
                         let ch = match effective_style {
                             EdgeStyle::Dotted => {
-                                if (x - start) % 4 != 0 {
+                                if (i64::from(x) - i64::from(start)) % 4 != 0 {
                                     continue;
                                 }
                                 horz_char
                             }
                             EdgeStyle::Dashed => {
-                                if (x - start) % 8 >= 4 {
+                                if (i64::from(x) - i64::from(start)) % 8 >= 4 {
                                     continue;
                                 }
                                 horz_char
@@ -1170,7 +1172,9 @@ fn render_flowchart_edges(
                     }
                 } else if x1 == x2 {
                     let (start, end) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
-                    for y in start..=end {
+                    for y in start.max(i32::from(canvas_area.top()))
+                        ..=end.min(i32::from(canvas_area.bottom()) - 1)
+                    {
                         if x1 < canvas_area.left() as i32
                             || x1 >= canvas_area.right() as i32
                             || y < canvas_area.top() as i32
@@ -1180,13 +1184,13 @@ fn render_flowchart_edges(
                         }
                         let ch = match effective_style {
                             EdgeStyle::Dotted => {
-                                if (y - start) % 4 != 0 {
+                                if (i64::from(y) - i64::from(start)) % 4 != 0 {
                                     continue;
                                 }
                                 vert_char
                             }
                             EdgeStyle::Dashed => {
-                                if (y - start) % 8 >= 4 {
+                                if (i64::from(y) - i64::from(start)) % 8 >= 4 {
                                     continue;
                                 }
                                 vert_char
@@ -1229,7 +1233,7 @@ fn render_flowchart_edges(
             let ey = sty.round() as i32;
 
             if is_horizontal_exit {
-                let mid_x = (sx + ex) / 2;
+                let mid_x = ((i64::from(sx) + i64::from(ex)) / 2) as i32;
                 draw_box_line(buf, sx, sy, mid_x, sy, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, mid_x, sy, mid_x, ey, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, mid_x, ey, ex, ey, '\u{2500}', '\u{2502}');
@@ -1251,13 +1255,13 @@ fn render_flowchart_edges(
                 }
 
                 let (arrow_c, arrow_col, arrow_row) = if ex > sx {
-                    ('\u{25b6}', ex - 1, ey)
+                    ('\u{25b6}', ex.saturating_sub(1), ey)
                 } else {
-                    ('\u{25c0}', ex + 1, ey)
+                    ('\u{25c0}', ex.saturating_add(1), ey)
                 };
                 draw_arrow(buf, arrow_c, arrow_col, arrow_row);
             } else {
-                let mid_y = (sy + ey) / 2;
+                let mid_y = ((i64::from(sy) + i64::from(ey)) / 2) as i32;
                 draw_box_line(buf, sx, sy, sx, mid_y, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, sx, mid_y, ex, mid_y, '\u{2500}', '\u{2502}');
                 draw_box_line(buf, ex, mid_y, ex, ey, '\u{2500}', '\u{2502}');
@@ -1279,9 +1283,9 @@ fn render_flowchart_edges(
                 }
 
                 let (arrow_c, arrow_col, arrow_row) = if ey > sy {
-                    ('\u{25bc}', ex, ey - 1)
+                    ('\u{25bc}', ex, ey.saturating_sub(1))
                 } else {
-                    ('\u{25b2}', ex, ey + 1)
+                    ('\u{25b2}', ex, ey.saturating_add(1))
                 };
                 draw_arrow(buf, arrow_c, arrow_col, arrow_row);
             }
@@ -2229,6 +2233,51 @@ fn is_generated_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distant_flowchart_edges_remain_bounded() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("distant.dot");
+        std::fs::write(&path, "digraph G {\n// pinstar_layout: A 1000000000000 0 200 100\n// pinstar_layout: B 2000000000000 0 200 100\nA -> B;\n}\n").unwrap();
+        let mut state = crate::PinstarState::load(&path).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for zoom in [0.1, 1000000000.0] {
+            state.zoom = zoom;
+            terminal
+                .draw(|frame| {
+                    super::draw_pinstar_view(
+                        frame,
+                        &mut state,
+                        &crate::ThemeColors::default(),
+                        frame.area(),
+                        None,
+                    )
+                })
+                .unwrap();
+        }
+        state.data.nodes[0] = crate::data::CanvasNode::Text(crate::data::TextNode {
+            id: "A".into(),
+            x: -1e12,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+            text: "A".into(),
+            title: None,
+            color: None,
+            shape: Default::default(),
+        });
+        terminal
+            .draw(|frame| {
+                super::draw_pinstar_view(
+                    frame,
+                    &mut state,
+                    &crate::ThemeColors::default(),
+                    frame.area(),
+                    None,
+                )
+            })
+            .unwrap();
+    }
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
