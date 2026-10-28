@@ -164,7 +164,11 @@ pub fn save_to_format(
                             && let Some(mut fields) = old.as_object().cloned()
                         {
                             // Absent titles are deliberate deletions; other unmodeled fields survive.
-                            fields.remove("title");
+                            if collection == "nodes"
+                                && matches!(item["type"].as_str(), Some("text" | "file" | "link"))
+                            {
+                                fields.remove("title");
+                            }
                             fields.extend(item.as_object().cloned().unwrap_or_default());
                             *item = serde_json::Value::Object(fields);
                         }

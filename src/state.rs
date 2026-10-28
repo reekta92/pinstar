@@ -75,7 +75,7 @@ pub struct PinstarState {
     saved_data: CanvasData,
     saved_layout_override: bool,
     pending_source: Option<String>,
-    raw_editor_source: String,
+    raw_editor_source: Vec<String>,
     undo_sources: Vec<String>,
     redo_sources: Vec<String>,
     save_handler: Option<SaveHandler>,
@@ -175,7 +175,7 @@ impl PinstarState {
             saved_data: data.clone(),
             saved_layout_override: has_layout_override,
             pending_source: None,
-            raw_editor_source: content.lines().collect::<Vec<_>>().join("\n"),
+            raw_editor_source: raw_editor.lines().to_vec(),
             undo_sources: Vec::new(),
             redo_sources: Vec::new(),
             save_handler: None,
@@ -276,13 +276,13 @@ impl PinstarState {
         self.data != self.saved_data
             || self.has_layout_override != self.saved_layout_override
             || self.pending_source.is_some()
-            || self.raw_editor.lines().join("\n") != self.raw_editor_source
+            || self.raw_editor.lines() != self.raw_editor_source.as_slice()
     }
 
     fn save_inner(&mut self) -> Result<()> {
         anyhow::ensure!(
             self.pending_source.is_some()
-                || self.raw_editor.lines().join("\n") == self.raw_editor_source,
+                || self.raw_editor.lines() == self.raw_editor_source.as_slice(),
             "Source edits pending; apply them with Ctrl+S in the source pane before saving"
         );
         let content = if self.data == self.saved_data
@@ -375,10 +375,12 @@ impl PinstarState {
 
     pub fn undo(&mut self) -> Result<()> {
         anyhow::ensure!(
-            self.raw_editor.lines().join("\n") == self.raw_editor_source
+            self.raw_editor.lines() == self.raw_editor_source.as_slice()
                 || self.pending_source.is_some(),
             "Apply pending source edits before undo"
         );
+        self.undo_sources
+            .resize_with(self.undo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.undo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
@@ -406,10 +408,12 @@ impl PinstarState {
 
     pub fn redo(&mut self) -> Result<()> {
         anyhow::ensure!(
-            self.raw_editor.lines().join("\n") == self.raw_editor_source
+            self.raw_editor.lines() == self.raw_editor_source.as_slice()
                 || self.pending_source.is_some(),
             "Apply pending source edits before redo"
         );
+        self.redo_sources
+            .resize_with(self.redo_stack.len(), || self.source.clone());
         if let Some(snapshot) = self.redo_stack.pop() {
             let current = PinstarSnapshot {
                 data: self.data.clone(),
@@ -799,7 +803,7 @@ impl PinstarState {
     }
 
     pub fn sync_to_raw_editor(&mut self) {
-        if self.raw_editor.lines().join("\n") != self.raw_editor_source {
+        if self.raw_editor.lines() != self.raw_editor_source.as_slice() {
             return;
         }
         if self.data == self.saved_data && self.pending_source.is_none() {
@@ -820,7 +824,7 @@ impl PinstarState {
         self.raw_editor
             .set_cursor_line_style(ratatui::style::Style::default());
         self.raw_editor.set_wrap_mode(WrapMode::WordOrGlyph);
-        self.raw_editor_source = self.raw_editor.lines().join("\n");
+        self.raw_editor_source = self.raw_editor.lines().to_vec();
     }
 
     pub fn pan(&mut self, dx: f64, dy: f64) {
@@ -1681,7 +1685,7 @@ mod tests {
     fn saves_keep_unmodeled_canvas_fields_without_restoring_deleted_items() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("diagram.canvas");
-        let original = r#"{"custom":42,"nodes":[{"type":"text","id":"a","x":1,"y":1,"width":100,"height":50,"text":"hello","title":"remove","custom":true}],"edges":[{"id":"e","fromNode":"a","toNode":"a","fromEnd":"none","toEnd":"none"}]}"#;
+        let original = r#"{"custom":42,"nodes":[{"type":"text","id":"a","x":1,"y":1,"width":100,"height":50,"text":"hello","title":"remove","custom":true}],"edges":[{"id":"e","fromNode":"a","toNode":"a","fromEnd":"none","toEnd":"none","title":"edge metadata"}]}"#;
         std::fs::write(&path, original).unwrap();
         let mut state = PinstarState::load(&path).unwrap();
         state.data.nodes[0].set_text("changed".into());
@@ -1693,6 +1697,7 @@ mod tests {
         assert_eq!(saved["nodes"][0]["custom"], true);
         assert!(saved["nodes"][0].get("title").is_none());
         assert_eq!(saved["edges"][0]["toEnd"], "none");
+        assert_eq!(saved["edges"][0]["title"], "edge metadata");
         state.selection.select_only("a".into());
         state.rename_node_id("renamed".into());
         let saved: serde_json::Value =
@@ -1723,6 +1728,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["nodes"][0]["custom"], true);
         assert_eq!(saved["edges"][0]["toEnd"], "none");
+        assert_eq!(saved["edges"][0]["title"], "edge metadata");
     }
 
     #[test]
