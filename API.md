@@ -502,11 +502,26 @@ state.image_picker = Some(ratatui_image::picker::Picker::from_query_stdio()?);
 
 // In your event loop, poll for completed decodes
 while let Ok(result) = rx.try_recv() {
-    if let (Ok(img), Some(picker)) = (result, state.image_picker.as_ref()) {
-        state.image_cache.install_decoded(img, picker);
+    match result {
+        Ok(img) => {
+            if let Some(picker) = state.image_picker.as_ref() {
+                state.image_cache.install_decoded(img, picker);
+            }
+        }
+        Err(error) => {
+            state.image_cache.finish_failed(&error);
+            // Display the diagnostic in the host's status area.
+        }
     }
 }
 ```
+
+The canvas renderer starts each cache draw pass automatically. Hosts that call
+`ImageCache::request` directly must call `begin_frame()` once per draw pass.
+Outstanding requests are capped at cache capacity. Additional visible images
+use placeholders until cached images leave the view; increase cache capacity to
+show more at once. Acknowledge errors with `finish_failed` to release pending
+slots. Relative attachment paths resolve beside the canvas file.
 
 ## Additional Public Modules
 

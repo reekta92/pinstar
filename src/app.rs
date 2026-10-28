@@ -139,8 +139,16 @@ fn run_loop(
         #[cfg(feature = "images")]
         if let Some(worker) = &worker {
             while let Ok(result) = worker.rx.try_recv() {
-                if let (Ok(img), Some(picker)) = (result, state.image_picker.as_ref()) {
-                    state.image_cache.install_decoded(img, picker);
+                match result {
+                    Ok(img) => {
+                        if let Some(picker) = state.image_picker.as_ref() {
+                            state.image_cache.install_decoded(img, picker);
+                        }
+                    }
+                    Err(error) => {
+                        state.image_cache.finish_failed(&error);
+                        state.footer_hint = error.to_string();
+                    }
                 }
             }
         }

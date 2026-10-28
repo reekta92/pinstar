@@ -672,6 +672,19 @@ fn is_image_ext(path: &str) -> bool {
     )
 }
 
+#[cfg(feature = "images")]
+fn resolve_image_path(canvas: &std::path::Path, file: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(file);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        canvas
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(path)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_canvas_nodes(
     frame: &mut Frame,
@@ -701,6 +714,9 @@ fn render_canvas_nodes(
         view_bottom,
     };
     let proj: Vec<Proj> = view.project_nodes().collect();
+
+    #[cfg(feature = "images")]
+    state.image_cache.begin_frame();
 
     for (idx, p) in proj.iter().enumerate() {
         if p.is_group || !p.on_screen {
@@ -823,7 +839,7 @@ fn render_canvas_nodes(
                     CanvasNode::File(n) => n.file.clone(),
                     _ => String::new(),
                 };
-                let key = std::path::PathBuf::from(&file_path);
+                let key = resolve_image_path(&state.path, &file_path);
                 if let Some(tx) = &state.image_decode_tx {
                     state.image_cache.request(key.clone(), 2048, tx);
                 }
@@ -2233,6 +2249,23 @@ fn is_generated_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "images")]
+    #[test]
+    fn image_paths_resolve_against_canvas_directory() {
+        use std::path::{Path, PathBuf};
+        assert_eq!(
+            super::resolve_image_path(Path::new("notes/diagram.canvas"), "assets/photo.png"),
+            PathBuf::from("notes/assets/photo.png")
+        );
+        let absolute = std::env::temp_dir().join("photo.png");
+        assert_eq!(
+            super::resolve_image_path(
+                Path::new("notes/diagram.canvas"),
+                absolute.to_str().unwrap()
+            ),
+            absolute
+        );
+    }
     #[test]
     fn distant_flowchart_edges_remain_bounded() {
         use ratatui::{Terminal, backend::TestBackend};

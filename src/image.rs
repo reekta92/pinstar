@@ -1,6 +1,7 @@
 //! Async image decode worker + LRU protocol cache (ported from clin's
 //! `image_render`; only compiled with the `images` feature).
 
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -23,6 +24,8 @@ pub struct DecodedImage {
 /// LRU-evicting cache of decoded images and their protocol renderers for one view.
 pub struct ImageCache {
     map: lru::LruCache<PathBuf, ImageEntry>,
+    pending: HashSet<PathBuf>,
+    frame_keys: HashSet<PathBuf>,
 }
 
 struct ImageEntry {
@@ -34,7 +37,14 @@ impl ImageCache {
     pub fn new(limit: usize) -> Self {
         Self {
             map: lru::LruCache::new(NonZeroUsize::new(limit.max(1)).expect("limit >= 1")),
+            pending: HashSet::new(),
+            frame_keys: HashSet::new(),
         }
+    }
+
+    /// Start a draw pass; images already used in this pass stay resident.
+    pub fn begin_frame(&mut self) {
+        self.frame_keys.clear();
     }
 
     /// Request an image for display. If the key is absent, sends a decode job
@@ -43,20 +53,52 @@ impl ImageCache {
         if self.map.contains(&key) {
             // Touch existing entry
             let _ = self.map.get_mut(&key);
+            self.frame_keys.insert(key);
             return;
         }
-        let _ = tx.send(ImageJob {
-            key: key.clone(),
-            max_dim,
-        });
+        if self.pending.len() >= self.map.cap().get() || self.pending.contains(&key) {
+            return;
+        }
+        if self.map.len() == self.map.cap().get() {
+            let victim = self
+                .map
+                .iter()
+                .rev()
+                .find(|(key, _)| !self.frame_keys.contains(*key) && !self.pending.contains(*key))
+                .map(|(key, _)| key.clone());
+            // shortcut: overflow images use placeholders, increase cache capacity for more simultaneous previews.
+            let Some(victim) = victim else {
+                return;
+            };
+            self.map.pop(&victim);
+        }
+        if tx
+            .send(ImageJob {
+                key: key.clone(),
+                max_dim,
+            })
+            .is_err()
+        {
+            return;
+        }
+        self.pending.insert(key.clone());
+        self.frame_keys.insert(key.clone());
         self.map.put(key, ImageEntry { proto: None });
     }
 
     /// Install a completed decode result and build the protocol renderer.
     pub fn install_decoded(&mut self, img: DecodedImage, picker: &Picker) {
+        self.pending.remove(&img.key);
         if let Some(entry) = self.map.get_mut(&img.key) {
             let proto = picker.new_resize_protocol(img.image);
             entry.proto = Some(proto);
+        }
+    }
+
+    /// Acknowledge a worker failure so another image can use its pending slot.
+    pub fn finish_failed(&mut self, error: &anyhow::Error) {
+        if let Some(failure) = error.downcast_ref::<DecodeFailure>() {
+            self.pending.remove(&failure.key);
         }
     }
 
@@ -105,11 +147,39 @@ pub fn spawn_worker() -> (Sender<ImageJob>, Receiver<Result<DecodedImage>>) {
 }
 
 fn process_job(job: ImageJob, result_tx: &Sender<Result<DecodedImage>>) {
-    let result = decode_image(&job.key, job.max_dim);
+    let result = decode_image(&job.key, job.max_dim).map_err(|error| {
+        anyhow::Error::new(DecodeFailure {
+            key: job.key.clone(),
+            error,
+        })
+    });
     let _ = result_tx.send(result.map(|img| DecodedImage {
         key: job.key,
         image: img,
     }));
+}
+
+#[derive(Debug)]
+struct DecodeFailure {
+    key: PathBuf,
+    error: anyhow::Error,
+}
+
+impl std::fmt::Display for DecodeFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Failed to decode image {}: {}",
+            self.key.display(),
+            self.error
+        )
+    }
+}
+
+impl std::error::Error for DecodeFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
 }
 
 fn decode_image(key: &PathBuf, max_dim: u32) -> Result<DynamicImage> {
@@ -141,6 +211,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overflow_requests_stay_bounded_across_frames() {
+        let mut cache = ImageCache::new(32);
+        let (tx, rx) = mpsc::channel();
+        for _ in 0..3 {
+            cache.begin_frame();
+            for index in 0..33 {
+                cache.request(PathBuf::from(format!("{index}.png")), 2048, &tx);
+            }
+        }
+        assert_eq!(rx.try_iter().count(), 32);
+        assert_eq!(cache.pending.len(), 32);
+        cache.pending.clear();
+        for _ in 0..3 {
+            cache.begin_frame();
+            for index in 0..33 {
+                cache.request(PathBuf::from(format!("{index}.png")), 2048, &tx);
+            }
+        }
+        assert_eq!(rx.try_iter().count(), 0);
+        cache.begin_frame();
+        cache.request(PathBuf::from("newly-visible.png"), 2048, &tx);
+        assert_eq!(rx.try_iter().count(), 1);
+    }
+
+    #[test]
+    fn worker_failures_release_pending_capacity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = spawn_worker();
+        let mut cache = ImageCache::new(1);
+        cache.request(dir.path().join("missing.png"), 2048, &tx);
+        let error = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .err()
+            .expect("missing image must fail");
+        cache.finish_failed(&error);
+        assert!(cache.pending.is_empty());
+        cache.begin_frame();
+        cache.request(dir.path().join("different.png"), 2048, &tx);
+        assert_eq!(cache.pending.len(), 1);
+    }
+
+    #[test]
     fn test_eviction() {
         let mut cache = ImageCache::new(2);
 
@@ -151,10 +264,12 @@ mod tests {
         let k3 = dir.join("c.png");
 
         // Insert two
-        let (tx, _) = std::sync::mpsc::channel();
+        let (tx, _rx) = std::sync::mpsc::channel();
         cache.request(k1.clone(), 100, &tx);
         cache.request(k2.clone(), 100, &tx);
         assert_eq!(cache.map.len(), 2);
+        cache.pending.clear();
+        cache.begin_frame();
 
         // Touch k1 so it's more recent
         cache.get_proto(&k1);
