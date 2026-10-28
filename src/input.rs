@@ -487,6 +487,26 @@ impl MouseOutcome {
     }
 }
 
+fn raw_editor_body(state: &PinstarState, area: Rect) -> Rect {
+    let area = if state.format == SupportedFormat::Canvas {
+        area
+    } else {
+        let gutter =
+            (state.raw_editor.lines().len().max(1).to_string().len() as u16 + 1).min(area.width);
+        Rect::new(
+            area.x + gutter,
+            area.y,
+            area.width.saturating_sub(gutter),
+            area.height,
+        )
+    };
+    state
+        .raw_editor
+        .block()
+        .map(|block| block.inner(area))
+        .unwrap_or(area)
+}
+
 /// Merged mouse handler: clin's canvas flow (marquee, multi-select, image
 /// resize handles, text selection) with standalone's flowchart right-drag
 /// (select-rect) and editor context menu.
@@ -735,14 +755,7 @@ pub fn handle_pinstar_mouse(
             if let Some(editor_area) = editor_area {
                 if contains_cell(editor_area, mouse.column, mouse.row) {
                     state.editor_focus = true;
-                    let digits = state.raw_editor.lines().len().max(1).to_string().len() as u16;
-                    let gutter_width = digits + 2;
-                    let body_inner = ratatui::layout::Rect::new(
-                        editor_area.x + gutter_width,
-                        editor_area.y + 1,
-                        editor_area.width.saturating_sub(gutter_width + 1),
-                        editor_area.height.saturating_sub(1),
-                    );
+                    let body_inner = raw_editor_body(state, editor_area);
                     let (sr, sc) = get_textarea_scroll(&state.raw_editor);
                     move_textarea_cursor_to_mouse_scrolled(
                         &mut state.raw_editor,
@@ -907,15 +920,7 @@ pub fn handle_pinstar_mouse(
                 match state.text_selection_target {
                     Some(crate::state::PinstarTextField::Raw) => {
                         if let Some(editor_area) = editor_area {
-                            let digits =
-                                state.raw_editor.lines().len().max(1).to_string().len() as u16;
-                            let gutter_width = digits + 2;
-                            let body_inner = ratatui::layout::Rect::new(
-                                editor_area.x + gutter_width,
-                                editor_area.y + 1,
-                                editor_area.width.saturating_sub(gutter_width + 1),
-                                editor_area.height.saturating_sub(1),
-                            );
+                            let body_inner = raw_editor_body(state, editor_area);
                             let (scroll_row, scroll_col) = get_textarea_scroll(&state.raw_editor);
                             move_textarea_cursor_to_mouse_scrolled(
                                 &mut state.raw_editor,
@@ -1353,6 +1358,39 @@ pub fn handle_pinstar_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_editor_click_matches_rendered_gutter_and_title() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagram.mermaid");
+        std::fs::write(&path, "graph TD\nA[abcdefghijkl]\n").unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state.show_editor_pane = true;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                crate::draw_pinstar_view(
+                    frame,
+                    &mut state,
+                    &crate::ThemeColors::default(),
+                    frame.area(),
+                    None,
+                )
+            })
+            .unwrap();
+        handle_pinstar_mouse(
+            &mut state,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 3,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, 100, 30),
+        );
+        assert_eq!(state.raw_editor.cursor(), (1, 1));
+    }
 
     #[test]
     fn failed_save_blocks_quit_until_retry_or_explicit_discard() {
