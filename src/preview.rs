@@ -18,6 +18,7 @@ use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod er;
+mod sequence;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 128;
@@ -55,8 +56,9 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .parse_metadata_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
     ensure!(
-        metadata.diagram_type.starts_with("flowchart") || metadata.diagram_type == "er",
-        "Only Mermaid flowchart and ER diagrams are supported in previews"
+        metadata.diagram_type.starts_with("flowchart")
+            || matches!(metadata.diagram_type.as_str(), "er" | "sequence"),
+        "Only Mermaid flowchart, ER and sequence diagrams are supported in previews"
     );
     let parsed = engine
         .parse_diagram_sync(source, ParseOptions::strict())?
@@ -85,6 +87,7 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .collect();
     let columns = columns.min(MAX_COLS);
     let mut preview = match metadata.diagram_type.as_str() {
+        "sequence" => sequence::render(serde_json::from_value(parsed.model)?, columns)?,
         "er" => er::render(serde_json::from_value(parsed.model)?, columns)?,
         _ => render_flowchart(serde_json::from_value(parsed.model)?, columns)?,
     };
@@ -293,6 +296,7 @@ fn render_flowchart(model: FlowchartV2Model, columns: u16) -> Result<MermaidPrev
 fn validate_source_complexity(source: &str) -> Result<()> {
     static FRONTMATTER: OnceLock<Regex> = OnceLock::new();
     static GROUP: OnceLock<Regex> = OnceLock::new();
+    static BLOCK: OnceLock<Regex> = OnceLock::new();
     // Match the pinned parser's CR normalization and frontmatter extraction.
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let source = normalized.trim_start();
@@ -327,6 +331,17 @@ fn validate_source_complexity(source: &str) -> Result<()> {
             .count()
             <= MAX_GROUPS,
         "Mermaid source exceeds 32-subgraph-keyword parser budget (labels/comments also count)"
+    );
+    ensure!(
+        BLOCK
+            .get_or_init(|| Regex::new(
+                r"(?mi)^\s*(?:opt|alt|loop|par|critical|break|rect|state)\b"
+            )
+            .expect("diagram block keywords"))
+            .find_iter(body)
+            .count()
+            <= MAX_GROUPS,
+        "Mermaid source exceeds 32-block parser budget"
     );
     Ok(())
 }
@@ -1138,11 +1153,7 @@ mod tests {
 
     #[test]
     fn invalid_unsupported_and_oversized_input_returns_error() {
-        for source in [
-            "flowchart TD\nA[broken",
-            "sequenceDiagram\nA->>B: hello",
-            "",
-        ] {
+        for source in ["flowchart TD\nA[broken", "classDiagram\nA <|-- B", ""] {
             assert!(render_mermaid(source, 80).is_err());
         }
         assert!(render_mermaid(&"a".repeat(MAX_SOURCE_BYTES + 1), 80).is_err());
