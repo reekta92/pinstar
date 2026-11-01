@@ -145,20 +145,6 @@ fn render_flowchart(model: FlowchartV2Model, columns: u16) -> Result<MermaidPrev
         "Mermaid diagram exceeds available preview area"
     );
     let mut buffer = Buffer::empty(Rect::new(0, 0, columns, scene.height.max(1)));
-    for item in &scene.boxes {
-        if let Kind::Group(index) = item.kind {
-            let group = &model.subgraphs[index];
-            draw_box(
-                &mut buffer,
-                item.rect,
-                &plain_label(&group.title),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .patch(renderer.css(&group.classes, &group.styles)),
-                "group",
-            );
-        }
-    }
     let bounds: BTreeMap<_, _> = scene
         .boxes
         .iter()
@@ -187,6 +173,20 @@ fn render_flowchart(model: FlowchartV2Model, columns: u16) -> Result<MermaidPrev
         }
         if edge.animate == Some(true) || edge.animation.is_some() {
             renderer.notice("Animated edges are shown as static connections");
+        }
+    }
+    for item in &scene.boxes {
+        if let Kind::Group(index) = item.kind {
+            let group = &model.subgraphs[index];
+            draw_box(
+                &mut buffer,
+                item.rect,
+                &plain_label(&group.title),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .patch(renderer.css(&group.classes, &group.styles)),
+                "group",
+            );
         }
     }
     for item in &scene.boxes {
@@ -529,6 +529,8 @@ impl<'a> Renderer<'a> {
             depth <= MAX_DEPTH,
             "Mermaid subgraph nesting exceeds 16 levels"
         );
+        let columns = self.columns.saturating_sub((depth * 4) as u16);
+        ensure!(columns >= 8, "Mermaid subgraphs need a wider preview");
         let ids: Vec<_> = self
             .kinds
             .keys()
@@ -594,8 +596,8 @@ impl<'a> Renderer<'a> {
             let scene = match kind {
                 Kind::Node(index) => {
                     let label = self.label(index);
-                    let width = (Line::raw(label.clone()).width() + 4)
-                        .clamp(8, self.columns as usize) as u16;
+                    let width =
+                        (Line::raw(label.clone()).width() + 4).clamp(8, columns as usize) as u16;
                     let rows = wrap_text(&label, width.saturating_sub(4).max(1) as usize).len();
                     ensure!(
                         rows <= MAX_ROWS as usize - 2,
@@ -620,7 +622,7 @@ impl<'a> Renderer<'a> {
                     child.width = child
                         .width
                         .saturating_add(4)
-                        .max(title_width.min(self.columns as usize) as u16);
+                        .max(title_width.min(columns as usize) as u16);
                     child.height = child.height.saturating_add(4);
                     for item in &mut child.boxes {
                         item.rect.x += 2;
@@ -638,15 +640,32 @@ impl<'a> Renderer<'a> {
                 }
             };
             ensure!(
-                scene.height <= MAX_ROWS && scene.width <= self.columns,
+                scene.height <= MAX_ROWS && scene.width <= columns,
                 "Mermaid diagram exceeds available preview area"
             );
             units.insert(id.clone(), scene);
         }
-        let horizontal = matches!(direction, "LR" | "RL");
+        let mut horizontal = matches!(direction, "LR" | "RL");
         let mut bands: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         for id in &ids {
             bands.entry(ranks[id]).or_default().push(id.clone());
+        }
+        if horizontal
+            && bands
+                .values()
+                .map(|band| {
+                    band.iter()
+                        .map(|id| usize::from(units[id].width))
+                        .max()
+                        .unwrap_or(0)
+                        + 3
+                })
+                .sum::<usize>()
+                .saturating_sub(3)
+                > usize::from(columns)
+        {
+            horizontal = false;
+            self.notice("Wide horizontal diagrams use vertical terminal layout");
         }
         let mut scene = Scene {
             width: 0,
@@ -659,13 +678,19 @@ impl<'a> Renderer<'a> {
             let mut thickness = 0;
             for id in band {
                 let mut child = units.remove(id).expect("layout unit");
+                if !horizontal && minor > 0 && minor + child.width > columns {
+                    major += thickness + 3;
+                    minor = 0;
+                    thickness = 0;
+                    self.notice("Wide diagram ranks wrap vertically to fit the preview");
+                }
                 let (x, y) = if horizontal {
                     (major, minor)
                 } else {
                     (minor, major)
                 };
                 ensure!(
-                    x <= self.columns.saturating_sub(child.width)
+                    x <= columns.saturating_sub(child.width)
                         && y <= MAX_ROWS.saturating_sub(child.height),
                     "Mermaid diagram exceeds available preview area"
                 );
@@ -689,7 +714,7 @@ impl<'a> Renderer<'a> {
             }
             major += thickness + 3;
             ensure!(
-                scene.width <= self.columns && scene.height <= MAX_ROWS,
+                scene.width <= columns && scene.height <= MAX_ROWS,
                 "Mermaid diagram exceeds available preview area"
             );
         }
@@ -1120,6 +1145,53 @@ mod tests {
         for label in ["Outer", "Inner", "A", "B", "C"] {
             assert!(output.contains(label), "{output}");
         }
+    }
+
+    #[test]
+    fn architecture_groups_and_long_labels_fit_narrow_previews() {
+        let source = include_str!("../fixtures/mermaid/architecture.mmd");
+        for columns in [60, 100, 160] {
+            let preview = render_mermaid(source, columns).unwrap();
+            let flat: String = text(&preview)
+                .chars()
+                .filter(|ch| !ch.is_whitespace() && !"┌┐└┘╭╮╰╯─│".contains(*ch))
+                .collect();
+            for label in [
+                "Applicationboundary",
+                "Identityboundary",
+                "Storage;separatedatabasesandowners",
+                "Tokenchecksandrequestvalidation",
+                "Sharedtransactionrules",
+                "Clientapplication",
+                "Database",
+            ] {
+                assert!(flat.contains(label), "missing {label}: {flat}");
+            }
+            assert!(
+                preview
+                    .lines
+                    .iter()
+                    .all(|line| line.width() <= usize::from(columns))
+            );
+        }
+    }
+
+    #[test]
+    fn wide_horizontal_flowcharts_reflow_without_dropping_nodes() {
+        let source =
+            "flowchart LR\nA[First long label] --> B[Second long label] --> C[Third long label]";
+        let preview = render_mermaid(source, 30).unwrap();
+        assert!(
+            preview
+                .notices
+                .iter()
+                .any(|notice| notice.contains("vertical"))
+        );
+        let output = text(&preview);
+        for label in ["First long label", "Second long label", "Third long label"] {
+            assert!(output.contains(label), "{output}");
+        }
+        assert!(preview.lines.iter().all(|line| line.width() <= 30));
     }
 
     #[test]
