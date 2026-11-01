@@ -19,6 +19,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod er;
 mod sequence;
+mod state;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 128;
@@ -57,9 +58,15 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
     ensure!(
         metadata.diagram_type.starts_with("flowchart")
-            || matches!(metadata.diagram_type.as_str(), "er" | "sequence"),
-        "Only Mermaid flowchart, ER and sequence diagrams are supported in previews"
+            || matches!(
+                metadata.diagram_type.as_str(),
+                "er" | "sequence" | "stateDiagram"
+            ),
+        "Only Mermaid flowchart, ER, sequence and state diagrams are supported in previews"
     );
+    if metadata.diagram_type == "stateDiagram" {
+        state::validate_source(source)?;
+    }
     let parsed = engine
         .parse_diagram_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
@@ -87,6 +94,7 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .collect();
     let columns = columns.min(MAX_COLS);
     let mut preview = match metadata.diagram_type.as_str() {
+        "stateDiagram" => state::render(serde_json::from_value(parsed.model)?, columns)?,
         "sequence" => sequence::render(serde_json::from_value(parsed.model)?, columns)?,
         "er" => er::render(serde_json::from_value(parsed.model)?, columns)?,
         _ => render_flowchart(serde_json::from_value(parsed.model)?, columns)?,
