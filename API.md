@@ -35,13 +35,13 @@ error. Hosts should retain fenced source with a diagnostic on errors. Pass only
 the code-block literal, not its Markdown fences. The host owns source positions,
 caching, theming defaults and scroll synchronization.
 
-Parsing uses `merman-core-clin 0.6.0`, the MIT/Apache-2.0 compatibility package
-with the upstream 0.6 parser API and a maintained YAML backend. No JavaScript
+Parsing uses an immutable Git revision of `merman-core-clin 0.6.0`, the
+MIT/Apache-2.0 compatibility package with the upstream 0.6 parser API and a maintained YAML backend. No JavaScript
 runtime or browser is required. Rust 1.90 or newer is required.
 The interactive `.canvas` model, parser, serializer and editing behavior are
 unchanged. Unknown or newer syntax is rejected rather than partially rendered.
 
-Terminal output preserves nodes, connections, edge labels and markers, nested
+Flowchart output preserves nodes, connections, edge labels and markers, nested
 subgraphs and directions, titles, accessibility text, classes and basic colors /
 text modifiers. Cycles and parallel edges are supported. Labels containing HTML
 become safe text; Markdown formatting may remain textual. Specialized shapes use
@@ -50,9 +50,28 @@ are static, and unsupported CSS/configuration is reported. Icons/images are text
 placeholders; remote assets are never fetched. Links/tooltips are text, callbacks
 never execute. This is syntax-aware terminal approximation, not browser/SVG parity.
 
-Limits: 64 KiB source, 128 nodes, 256 edges, 32 groups, 16 nesting levels, 240
+Sequence previews support actors, participant aliases, solid/dashed message arrows,
+self-messages and nested `loop`, `opt`, `alt` and `else` blocks. Numbered headers
+identify lifelines; full messages wrap above their arrows. Activations, parallel
+blocks, notes, participant boxes, dynamic participants and other event types
+return an error rather than an incomplete preview.
+
+ER previews use entity cards and cardinality-labelled relationships. Attributes,
+types, PK/FK/UK keys, comments and disconnected entities remain visible.
+State previews use state cards with every outgoing transition, start/end markers,
+self-loops and attached notes. Note placement and styling use explicit terminal
+equivalents. Composite states and specialized state shapes return an error.
+Bare semicolons in state transition labels also return an error: Mermaid treats
+their remaining text as additional states. Use a comma in the source label.
+
+Wide flowchart ranks wrap vertically, and horizontal diagrams can use vertical
+terminal layout with a notice. Group borders have space reserved inside the
+available width; connections cannot overwrite group headings.
+
+Limits: 64 KiB source, 128 nodes/entities/participants, 256 edges/events, 32 groups, 16 nesting levels, 240
 columns and 512 diagram rows. Before native parsing, chart-body budgets cap raw `&` characters at 32,
-opening delimiters (`[`, `(`, `{`) at 256, and `subgraph` words at 32.
+opening delimiters (`[`, `(`, `{`) at 256, `subgraph` words at 32 and block-opening
+keywords at 32. State source also has a conservative 16-opening-brace budget.
 Labels, directive contents and comments also count: these conservative budgets
 cannot be bypassed by quote-state tricks. YAML frontmatter uses a non-expanding
 scanner, caps structure depth at 16, and rejects anchors/aliases before native
