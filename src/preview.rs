@@ -1,4 +1,4 @@
-//! Bounded, read-only Mermaid flowchart previews. No files, callbacks or network I/O.
+//! Bounded, read-only Mermaid previews. No files, callbacks or network I/O.
 //!
 //! The grammar and semantic model come from `merman-core`; the interactive canvas
 //! schema is deliberately not used as an intermediate representation, since it
@@ -16,6 +16,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
+
+mod er;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 128;
@@ -35,9 +37,9 @@ pub struct MermaidPreview {
     pub notices: Vec<String>,
 }
 
-/// Parse a complete Mermaid flowchart literal and render it at terminal-cell width.
+/// Parse a complete Mermaid literal and render it at terminal-cell width.
 ///
-/// Non-flowcharts, malformed input and diagrams exceeding the bounded preview area
+/// Unsupported diagrams, malformed input and diagrams exceeding the bounded preview area
 /// return an error. The caller should retain the fenced source with a diagnostic.
 /// Browser-only features are represented as text, never executed or fetched.
 pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
@@ -53,16 +55,12 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .parse_metadata_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
     ensure!(
-        metadata.diagram_type.starts_with("flowchart"),
-        "Only Mermaid flowcharts are supported in previews"
+        metadata.diagram_type.starts_with("flowchart") || metadata.diagram_type == "er",
+        "Only Mermaid flowchart and ER diagrams are supported in previews"
     );
     let parsed = engine
         .parse_diagram_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
-    ensure!(
-        parsed.meta.diagram_type.starts_with("flowchart"),
-        "Only Mermaid flowcharts are supported in previews"
-    );
     let title = parsed.meta.title.as_deref().map(plain_label);
     let configured = parsed
         .meta
@@ -70,14 +68,65 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .as_value()
         .as_object()
         .is_some_and(|config| !config.is_empty());
-    let model: FlowchartV2Model = serde_json::from_value(parsed.model)?;
+    let headings: BTreeSet<_> = title
+        .into_iter()
+        .chain(
+            parsed
+                .model
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(plain_label),
+        )
+        .collect();
+    let descriptions: Vec<_> = ["accTitle", "accDescr"]
+        .into_iter()
+        .filter_map(|key| parsed.model.get(key).and_then(|value| value.as_str()))
+        .map(plain_label)
+        .collect();
+    let columns = columns.min(MAX_COLS);
+    let mut preview = match metadata.diagram_type.as_str() {
+        "er" => er::render(serde_json::from_value(parsed.model)?, columns)?,
+        _ => render_flowchart(serde_json::from_value(parsed.model)?, columns)?,
+    };
+    let mut lines = Vec::new();
+    for heading in headings {
+        lines.extend(text_lines(
+            &heading,
+            columns,
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.append(&mut preview.lines);
+    for description in descriptions {
+        lines.extend(text_lines(&description, columns, Style::default()));
+    }
+    if configured {
+        preview.notices.push(
+            "Mermaid configuration is parsed; browser themes and geometry use terminal equivalents"
+                .to_owned(),
+        );
+    }
+    ensure!(
+        lines.len() <= MAX_ROWS as usize,
+        "Mermaid output exceeds 512-row preview limit"
+    );
+    ensure!(
+        lines
+            .iter()
+            .all(|line| line.width() <= usize::from(columns)),
+        "Mermaid diagram exceeds available preview width"
+    );
+    preview.lines = lines;
+    Ok(preview)
+}
+
+fn render_flowchart(model: FlowchartV2Model, columns: u16) -> Result<MermaidPreview> {
     ensure!(
         model.nodes.len() <= MAX_NODES
             && model.edges.len() <= MAX_EDGES
             && model.subgraphs.len() <= MAX_GROUPS,
         "Mermaid diagram exceeds preview limit (128 nodes, 256 edges, 32 subgraphs)"
     );
-    let columns = columns.min(MAX_COLS);
     let mut renderer = Renderer::new(&model, columns)?;
     let scene = renderer.container(None, model.direction.as_deref().unwrap_or("TB"), 0)?;
     ensure!(
@@ -144,19 +193,6 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         }
     }
     let mut lines = buffer_lines(&buffer);
-    if let Some(title) = title {
-        let mut heading: Vec<_> = wrap_text(&title, columns as usize)
-            .into_iter()
-            .map(|line| Line::styled(line, Style::default().add_modifier(Modifier::BOLD)))
-            .collect();
-        heading.append(&mut lines);
-        lines = heading;
-    }
-    if configured {
-        renderer.notice(
-            "Mermaid configuration is parsed; browser themes and geometry use terminal equivalents",
-        );
-    }
     // Edge labels stay complete even when a routing lane is too narrow. This also
     // makes parallel edges, self-loops, and their endpoint types unambiguous.
     for edge in &model.edges {
@@ -237,13 +273,6 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
                 .map(Line::raw),
             );
         }
-    }
-    for text in [&model.acc_title, &model.acc_descr].into_iter().flatten() {
-        lines.extend(
-            wrap_text(&plain_label(text), columns as usize)
-                .into_iter()
-                .map(Line::raw),
-        );
     }
     if model.edge_defaults.is_some() {
         renderer.notice("Edge defaults and CSS are approximated by terminal styles");
@@ -779,6 +808,33 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         lines.push(row);
     }
     lines
+}
+
+fn text_lines(text: &str, columns: u16, style: Style) -> Vec<Line<'static>> {
+    wrap_text(&plain_label(text), usize::from(columns))
+        .into_iter()
+        .map(|row| Line::styled(row, style))
+        .collect()
+}
+
+fn card(label: &str, columns: u16, style: Style) -> Result<Vec<Line<'static>>> {
+    let label = plain_label(label);
+    let width = (label
+        .lines()
+        .map(|line| Line::raw(line).width())
+        .max()
+        .unwrap_or(0)
+        + 4)
+    .clamp(8, usize::from(columns)) as u16;
+    let rows = wrap_text(&label, usize::from(width - 4)).len();
+    ensure!(
+        rows <= usize::from(MAX_ROWS - 2),
+        "Mermaid card exceeds preview height"
+    );
+    let area = Rect::new(0, 0, width, rows as u16 + 2);
+    let mut buffer = Buffer::empty(area);
+    draw_box(&mut buffer, area, &label, style, "rect");
+    Ok(buffer_lines(&buffer))
 }
 
 fn put(buffer: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
