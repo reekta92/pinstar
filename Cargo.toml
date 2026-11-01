@@ -33,7 +33,7 @@ serde_json = "1.0"
 uuid = { version = "1.8", features = ["v4"] }
 anyhow = "1.0"
 regex = "1.10"
-merman-core = { package = "merman-core-clin", version = "=0.6.0", git = "https://github.com/reekta92/merman", rev = "cfa6b11a5fb36ea9b89cad8ccebc2d60dc131d99", optional = true, default-features = false }
+merman-core = { package = "merman-core-clin", version = "=0.6.0", git = "https://github.com/reekta92/merman", rev = "d3d4afb75232708616b7e6127b28ff9cb42b4c76", optional = true, default-features = false }
 htmlize = { version = "1.0.6", optional = true, default-features = false, features = ["unescape"] }
 unicode-segmentation = { version = "1.12", optional = true }
 yaml-rust2 = { version = "=0.13.0", optional = true, default-features = false }

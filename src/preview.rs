@@ -1454,4 +1454,96 @@ mod tests {
             "♥ \" © #notanentity;"
         );
     }
+
+    #[test]
+    fn schema_sized_er_diagram_keeps_every_entity_and_attribute() {
+        let mut source = String::from("erDiagram\n");
+        let mut expected = Vec::new();
+        for entity in 0..14 {
+            let name = format!("entity_{entity:02}");
+            expected.push(name.clone());
+            source.push_str(&format!("{name} {{\n"));
+            for field in 0..if entity < 7 { 5 } else { 4 } {
+                let name = format!("field_{entity:02}_{field}");
+                source.push_str(&format!("text {name} \"nullable\"\n"));
+                expected.push(name);
+            }
+            source.push_str("}\n");
+        }
+        for edge in 0..13 {
+            source.push_str(&format!(
+                "entity_{:02} ||--o{{ entity_{:02} : relates\n",
+                edge % 11,
+                (edge + 1) % 11
+            ));
+        }
+        for columns in [60, 100, 160] {
+            let preview = render_mermaid(&source, columns).unwrap();
+            let output = text(&preview);
+            for label in &expected {
+                assert!(output.contains(label), "missing {label}: {output}");
+            }
+            assert!(preview.lines.len() <= usize::from(MAX_ROWS));
+            assert!(
+                preview
+                    .lines
+                    .iter()
+                    .all(|line| line.width() <= usize::from(columns))
+            );
+        }
+    }
+
+    #[test]
+    fn new_diagram_families_keep_unicode_and_strip_terminal_controls() {
+        for source in [
+            "sequenceDiagram\nA->>B: 日本語 🦀\u{1b}[31m",
+            "erDiagram\n資料 {\ntext 名前 \"日本語 🦀\u{1b}[31m\"\n}",
+            "stateDiagram-v2\nA --> B: 日本語 🦀\u{1b}[31m",
+        ] {
+            let preview = render_mermaid(source, 60).unwrap();
+            let output = text(&preview);
+            assert!(output.contains("日本語 🦀"), "{output}");
+            assert!(preview.lines.iter().all(|line| {
+                line.width() <= 60 && !line.to_string().chars().any(char::is_control)
+            }));
+        }
+    }
+
+    #[test]
+    fn new_diagram_families_reject_excessive_counts_and_nesting() {
+        let source = format!(
+            "erDiagram\n{}",
+            (0..129)
+                .map(|index| format!("E{index} {{\ntext field\n}}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("128 entities")
+        );
+        let source = format!(
+            "sequenceDiagram\nA->>B: Hi\n{}B-->>A: Bye\n{}",
+            "opt conditional\n".repeat(17),
+            "end\n".repeat(17)
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("nesting")
+        );
+        let source = format!(
+            "stateDiagram-v2\n{}A-->B\n{}",
+            "state Group {\n".repeat(17),
+            "}\n".repeat(17)
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("parser budget")
+        );
+    }
 }
