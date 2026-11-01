@@ -2113,21 +2113,48 @@ fn render_rename_popup(
 ) {
     state.rename_popup_rect = None;
     if let Some(textarea) = &mut state.rename_popup {
-        let popup_area = centered_rect(60, 20, area);
-        frame.render_widget(Clear, popup_area);
-
-        textarea.set_style(theme.bg_style());
-        textarea.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.accent))
-                .style(theme.bg_style())
-                .title(Span::styled(
-                    " Rename Node — Enter: confirm · Esc: cancel ",
-                    Style::default().fg(theme.accent),
-                )),
+        let width = (area.width / 2).clamp(30.min(area.width), 80.min(area.width));
+        let height = 4.min(area.height.saturating_sub(1));
+        let popup_area = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + area.height.saturating_sub(height + 1) / 2,
+            width,
+            height,
         );
-
+        frame.render_widget(Clear, popup_area);
+        if popup_area.y > 0 {
+            let title = " RENAME NODE ";
+            let width = Line::from(title).width().min(popup_area.width as usize) as u16;
+            frame.render_widget(
+                Paragraph::new(title)
+                    .style(Style::default().fg(theme.highlight_fg).bg(theme.heading)),
+                Rect::new(
+                    popup_area.x + (popup_area.width - width) / 2,
+                    popup_area.y - 1,
+                    width,
+                    1,
+                ),
+            );
+        }
+        textarea.set_style(theme.bg_style());
+        textarea.set_cursor_style(
+            Style::default()
+                .fg(theme.highlight_fg)
+                .bg(theme.highlight_bg),
+        );
+        textarea.set_block(
+            Block::bordered()
+                .border_style(Style::default().fg(theme.heading))
+                .style(theme.bg_style()),
+        );
+        if state.settings.show_hints && popup_area.bottom() < area.bottom() {
+            frame.render_widget(
+                Paragraph::new("Enter confirm · Esc cancel")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(theme.muted).bg(theme.hint_line_bg())),
+                Rect::new(popup_area.x, popup_area.bottom(), popup_area.width, 1),
+            );
+        }
         state.rename_popup_rect = Some(Block::default().borders(Borders::ALL).inner(popup_area));
         frame.render_widget(&*textarea, popup_area);
     }
