@@ -1,4 +1,4 @@
-//! Bounded, read-only Mermaid flowchart previews. No files, callbacks or network I/O.
+//! Bounded, read-only Mermaid previews. No files, callbacks or network I/O.
 //!
 //! The grammar and semantic model come from `merman-core`; the interactive canvas
 //! schema is deliberately not used as an intermediate representation, since it
@@ -16,6 +16,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
+
+mod er;
+mod sequence;
+mod state;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 128;
@@ -35,9 +39,9 @@ pub struct MermaidPreview {
     pub notices: Vec<String>,
 }
 
-/// Parse a complete Mermaid flowchart literal and render it at terminal-cell width.
+/// Parse a complete Mermaid literal and render it at terminal-cell width.
 ///
-/// Non-flowcharts, malformed input and diagrams exceeding the bounded preview area
+/// Unsupported diagrams, malformed input and diagrams exceeding the bounded preview area
 /// return an error. The caller should retain the fenced source with a diagnostic.
 /// Browser-only features are represented as text, never executed or fetched.
 pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
@@ -53,16 +57,19 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .parse_metadata_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
     ensure!(
-        metadata.diagram_type.starts_with("flowchart"),
-        "Only Mermaid flowcharts are supported in previews"
+        metadata.diagram_type.starts_with("flowchart")
+            || matches!(
+                metadata.diagram_type.as_str(),
+                "er" | "sequence" | "stateDiagram"
+            ),
+        "Only Mermaid flowchart, ER, sequence and state diagrams are supported in previews"
     );
+    if metadata.diagram_type == "stateDiagram" {
+        state::validate_source(source)?;
+    }
     let parsed = engine
         .parse_diagram_sync(source, ParseOptions::strict())?
         .ok_or_else(|| anyhow::anyhow!("Empty Mermaid diagram"))?;
-    ensure!(
-        parsed.meta.diagram_type.starts_with("flowchart"),
-        "Only Mermaid flowcharts are supported in previews"
-    );
     let title = parsed.meta.title.as_deref().map(plain_label);
     let configured = parsed
         .meta
@@ -70,14 +77,67 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         .as_value()
         .as_object()
         .is_some_and(|config| !config.is_empty());
-    let model: FlowchartV2Model = serde_json::from_value(parsed.model)?;
+    let headings: BTreeSet<_> = title
+        .into_iter()
+        .chain(
+            parsed
+                .model
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(plain_label),
+        )
+        .collect();
+    let descriptions: Vec<_> = ["accTitle", "accDescr"]
+        .into_iter()
+        .filter_map(|key| parsed.model.get(key).and_then(|value| value.as_str()))
+        .map(plain_label)
+        .collect();
+    let columns = columns.min(MAX_COLS);
+    let mut preview = match metadata.diagram_type.as_str() {
+        "stateDiagram" => state::render(serde_json::from_value(parsed.model)?, columns)?,
+        "sequence" => sequence::render(serde_json::from_value(parsed.model)?, columns)?,
+        "er" => er::render(serde_json::from_value(parsed.model)?, columns)?,
+        _ => render_flowchart(serde_json::from_value(parsed.model)?, columns)?,
+    };
+    let mut lines = Vec::new();
+    for heading in headings {
+        lines.extend(text_lines(
+            &heading,
+            columns,
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.append(&mut preview.lines);
+    for description in descriptions {
+        lines.extend(text_lines(&description, columns, Style::default()));
+    }
+    if configured {
+        preview.notices.push(
+            "Mermaid configuration is parsed; browser themes and geometry use terminal equivalents"
+                .to_owned(),
+        );
+    }
+    ensure!(
+        lines.len() <= MAX_ROWS as usize,
+        "Mermaid output exceeds 512-row preview limit"
+    );
+    ensure!(
+        lines
+            .iter()
+            .all(|line| line.width() <= usize::from(columns)),
+        "Mermaid diagram exceeds available preview width"
+    );
+    preview.lines = lines;
+    Ok(preview)
+}
+
+fn render_flowchart(model: FlowchartV2Model, columns: u16) -> Result<MermaidPreview> {
     ensure!(
         model.nodes.len() <= MAX_NODES
             && model.edges.len() <= MAX_EDGES
             && model.subgraphs.len() <= MAX_GROUPS,
         "Mermaid diagram exceeds preview limit (128 nodes, 256 edges, 32 subgraphs)"
     );
-    let columns = columns.min(MAX_COLS);
     let mut renderer = Renderer::new(&model, columns)?;
     let scene = renderer.container(None, model.direction.as_deref().unwrap_or("TB"), 0)?;
     ensure!(
@@ -85,20 +145,6 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         "Mermaid diagram exceeds available preview area"
     );
     let mut buffer = Buffer::empty(Rect::new(0, 0, columns, scene.height.max(1)));
-    for item in &scene.boxes {
-        if let Kind::Group(index) = item.kind {
-            let group = &model.subgraphs[index];
-            draw_box(
-                &mut buffer,
-                item.rect,
-                &plain_label(&group.title),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .patch(renderer.css(&group.classes, &group.styles)),
-                "group",
-            );
-        }
-    }
     let bounds: BTreeMap<_, _> = scene
         .boxes
         .iter()
@@ -130,6 +176,20 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         }
     }
     for item in &scene.boxes {
+        if let Kind::Group(index) = item.kind {
+            let group = &model.subgraphs[index];
+            draw_box(
+                &mut buffer,
+                item.rect,
+                &plain_label(&group.title),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .patch(renderer.css(&group.classes, &group.styles)),
+                "group",
+            );
+        }
+    }
+    for item in &scene.boxes {
         if let Kind::Node(index) = item.kind {
             let node = &model.nodes[index];
             let label = renderer.label(index);
@@ -144,19 +204,6 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
         }
     }
     let mut lines = buffer_lines(&buffer);
-    if let Some(title) = title {
-        let mut heading: Vec<_> = wrap_text(&title, columns as usize)
-            .into_iter()
-            .map(|line| Line::styled(line, Style::default().add_modifier(Modifier::BOLD)))
-            .collect();
-        heading.append(&mut lines);
-        lines = heading;
-    }
-    if configured {
-        renderer.notice(
-            "Mermaid configuration is parsed; browser themes and geometry use terminal equivalents",
-        );
-    }
     // Edge labels stay complete even when a routing lane is too narrow. This also
     // makes parallel edges, self-loops, and their endpoint types unambiguous.
     for edge in &model.edges {
@@ -238,13 +285,6 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
             );
         }
     }
-    for text in [&model.acc_title, &model.acc_descr].into_iter().flatten() {
-        lines.extend(
-            wrap_text(&plain_label(text), columns as usize)
-                .into_iter()
-                .map(Line::raw),
-        );
-    }
     if model.edge_defaults.is_some() {
         renderer.notice("Edge defaults and CSS are approximated by terminal styles");
     }
@@ -264,6 +304,7 @@ pub fn render_mermaid(source: &str, columns: u16) -> Result<MermaidPreview> {
 fn validate_source_complexity(source: &str) -> Result<()> {
     static FRONTMATTER: OnceLock<Regex> = OnceLock::new();
     static GROUP: OnceLock<Regex> = OnceLock::new();
+    static BLOCK: OnceLock<Regex> = OnceLock::new();
     // Match the pinned parser's CR normalization and frontmatter extraction.
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let source = normalized.trim_start();
@@ -298,6 +339,17 @@ fn validate_source_complexity(source: &str) -> Result<()> {
             .count()
             <= MAX_GROUPS,
         "Mermaid source exceeds 32-subgraph-keyword parser budget (labels/comments also count)"
+    );
+    ensure!(
+        BLOCK
+            .get_or_init(|| Regex::new(
+                r"(?mi)^\s*(?:opt|alt|loop|par|critical|break|rect|state)\b"
+            )
+            .expect("diagram block keywords"))
+            .find_iter(body)
+            .count()
+            <= MAX_GROUPS,
+        "Mermaid source exceeds 32-block parser budget"
     );
     Ok(())
 }
@@ -477,6 +529,8 @@ impl<'a> Renderer<'a> {
             depth <= MAX_DEPTH,
             "Mermaid subgraph nesting exceeds 16 levels"
         );
+        let columns = self.columns.saturating_sub((depth * 4) as u16);
+        ensure!(columns >= 8, "Mermaid subgraphs need a wider preview");
         let ids: Vec<_> = self
             .kinds
             .keys()
@@ -542,8 +596,8 @@ impl<'a> Renderer<'a> {
             let scene = match kind {
                 Kind::Node(index) => {
                     let label = self.label(index);
-                    let width = (Line::raw(label.clone()).width() + 4)
-                        .clamp(8, self.columns as usize) as u16;
+                    let width =
+                        (Line::raw(label.clone()).width() + 4).clamp(8, columns as usize) as u16;
                     let rows = wrap_text(&label, width.saturating_sub(4).max(1) as usize).len();
                     ensure!(
                         rows <= MAX_ROWS as usize - 2,
@@ -568,7 +622,7 @@ impl<'a> Renderer<'a> {
                     child.width = child
                         .width
                         .saturating_add(4)
-                        .max(title_width.min(self.columns as usize) as u16);
+                        .max(title_width.min(columns as usize) as u16);
                     child.height = child.height.saturating_add(4);
                     for item in &mut child.boxes {
                         item.rect.x += 2;
@@ -586,15 +640,32 @@ impl<'a> Renderer<'a> {
                 }
             };
             ensure!(
-                scene.height <= MAX_ROWS && scene.width <= self.columns,
+                scene.height <= MAX_ROWS && scene.width <= columns,
                 "Mermaid diagram exceeds available preview area"
             );
             units.insert(id.clone(), scene);
         }
-        let horizontal = matches!(direction, "LR" | "RL");
+        let mut horizontal = matches!(direction, "LR" | "RL");
         let mut bands: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         for id in &ids {
             bands.entry(ranks[id]).or_default().push(id.clone());
+        }
+        if horizontal
+            && bands
+                .values()
+                .map(|band| {
+                    band.iter()
+                        .map(|id| usize::from(units[id].width))
+                        .max()
+                        .unwrap_or(0)
+                        + 3
+                })
+                .sum::<usize>()
+                .saturating_sub(3)
+                > usize::from(columns)
+        {
+            horizontal = false;
+            self.notice("Wide horizontal diagrams use vertical terminal layout");
         }
         let mut scene = Scene {
             width: 0,
@@ -607,13 +678,19 @@ impl<'a> Renderer<'a> {
             let mut thickness = 0;
             for id in band {
                 let mut child = units.remove(id).expect("layout unit");
+                if !horizontal && minor > 0 && minor + child.width > columns {
+                    major += thickness + 3;
+                    minor = 0;
+                    thickness = 0;
+                    self.notice("Wide diagram ranks wrap vertically to fit the preview");
+                }
                 let (x, y) = if horizontal {
                     (major, minor)
                 } else {
                     (minor, major)
                 };
                 ensure!(
-                    x <= self.columns.saturating_sub(child.width)
+                    x <= columns.saturating_sub(child.width)
                         && y <= MAX_ROWS.saturating_sub(child.height),
                     "Mermaid diagram exceeds available preview area"
                 );
@@ -637,7 +714,7 @@ impl<'a> Renderer<'a> {
             }
             major += thickness + 3;
             ensure!(
-                scene.width <= self.columns && scene.height <= MAX_ROWS,
+                scene.width <= columns && scene.height <= MAX_ROWS,
                 "Mermaid diagram exceeds available preview area"
             );
         }
@@ -779,6 +856,33 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         lines.push(row);
     }
     lines
+}
+
+fn text_lines(text: &str, columns: u16, style: Style) -> Vec<Line<'static>> {
+    wrap_text(&plain_label(text), usize::from(columns))
+        .into_iter()
+        .map(|row| Line::styled(row, style))
+        .collect()
+}
+
+fn card(label: &str, columns: u16, style: Style) -> Result<Vec<Line<'static>>> {
+    let label = plain_label(label);
+    let width = (label
+        .lines()
+        .map(|line| Line::raw(line).width())
+        .max()
+        .unwrap_or(0)
+        + 4)
+    .clamp(8, usize::from(columns)) as u16;
+    let rows = wrap_text(&label, usize::from(width - 4)).len();
+    ensure!(
+        rows <= usize::from(MAX_ROWS - 2),
+        "Mermaid card exceeds preview height"
+    );
+    let area = Rect::new(0, 0, width, rows as u16 + 2);
+    let mut buffer = Buffer::empty(area);
+    draw_box(&mut buffer, area, &label, style, "rect");
+    Ok(buffer_lines(&buffer))
 }
 
 fn put(buffer: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
@@ -1044,6 +1148,53 @@ mod tests {
     }
 
     #[test]
+    fn architecture_groups_and_long_labels_fit_narrow_previews() {
+        let source = include_str!("../fixtures/mermaid/architecture.mmd");
+        for columns in [60, 100, 160] {
+            let preview = render_mermaid(source, columns).unwrap();
+            let flat: String = text(&preview)
+                .chars()
+                .filter(|ch| !ch.is_whitespace() && !"┌┐└┘╭╮╰╯─│".contains(*ch))
+                .collect();
+            for label in [
+                "Applicationboundary",
+                "Identityboundary",
+                "Storage;separatedatabasesandowners",
+                "Tokenchecksandrequestvalidation",
+                "Sharedtransactionrules",
+                "Clientapplication",
+                "Database",
+            ] {
+                assert!(flat.contains(label), "missing {label}: {flat}");
+            }
+            assert!(
+                preview
+                    .lines
+                    .iter()
+                    .all(|line| line.width() <= usize::from(columns))
+            );
+        }
+    }
+
+    #[test]
+    fn wide_horizontal_flowcharts_reflow_without_dropping_nodes() {
+        let source =
+            "flowchart LR\nA[First long label] --> B[Second long label] --> C[Third long label]";
+        let preview = render_mermaid(source, 30).unwrap();
+        assert!(
+            preview
+                .notices
+                .iter()
+                .any(|notice| notice.contains("vertical"))
+        );
+        let output = text(&preview);
+        for label in ["First long label", "Second long label", "Third long label"] {
+            assert!(output.contains(label), "{output}");
+        }
+        assert!(preview.lines.iter().all(|line| line.width() <= 30));
+    }
+
+    #[test]
     fn cycles_parallel_edges_self_loops_and_markers() {
         let preview = render_mermaid(
             "graph TD\nA o--o B\nB x--x A\nA -->|again| A\nA -->|second| B",
@@ -1082,11 +1233,7 @@ mod tests {
 
     #[test]
     fn invalid_unsupported_and_oversized_input_returns_error() {
-        for source in [
-            "flowchart TD\nA[broken",
-            "sequenceDiagram\nA->>B: hello",
-            "",
-        ] {
+        for source in ["flowchart TD\nA[broken", "classDiagram\nA <|-- B", ""] {
             assert!(render_mermaid(source, 80).is_err());
         }
         assert!(render_mermaid(&"a".repeat(MAX_SOURCE_BYTES + 1), 80).is_err());
@@ -1305,6 +1452,98 @@ mod tests {
         assert_eq!(
             plain_label("#9829; #quot; &copy; #notanentity;"),
             "♥ \" © #notanentity;"
+        );
+    }
+
+    #[test]
+    fn schema_sized_er_diagram_keeps_every_entity_and_attribute() {
+        let mut source = String::from("erDiagram\n");
+        let mut expected = Vec::new();
+        for entity in 0..14 {
+            let name = format!("entity_{entity:02}");
+            expected.push(name.clone());
+            source.push_str(&format!("{name} {{\n"));
+            for field in 0..if entity < 7 { 5 } else { 4 } {
+                let name = format!("field_{entity:02}_{field}");
+                source.push_str(&format!("text {name} \"nullable\"\n"));
+                expected.push(name);
+            }
+            source.push_str("}\n");
+        }
+        for edge in 0..13 {
+            source.push_str(&format!(
+                "entity_{:02} ||--o{{ entity_{:02} : relates\n",
+                edge % 11,
+                (edge + 1) % 11
+            ));
+        }
+        for columns in [60, 100, 160] {
+            let preview = render_mermaid(&source, columns).unwrap();
+            let output = text(&preview);
+            for label in &expected {
+                assert!(output.contains(label), "missing {label}: {output}");
+            }
+            assert!(preview.lines.len() <= usize::from(MAX_ROWS));
+            assert!(
+                preview
+                    .lines
+                    .iter()
+                    .all(|line| line.width() <= usize::from(columns))
+            );
+        }
+    }
+
+    #[test]
+    fn new_diagram_families_keep_unicode_and_strip_terminal_controls() {
+        for source in [
+            "sequenceDiagram\nA->>B: 日本語 🦀\u{1b}[31m",
+            "erDiagram\n資料 {\ntext 名前 \"日本語 🦀\u{1b}[31m\"\n}",
+            "stateDiagram-v2\nA --> B: 日本語 🦀\u{1b}[31m",
+        ] {
+            let preview = render_mermaid(source, 60).unwrap();
+            let output = text(&preview);
+            assert!(output.contains("日本語 🦀"), "{output}");
+            assert!(preview.lines.iter().all(|line| {
+                line.width() <= 60 && !line.to_string().chars().any(char::is_control)
+            }));
+        }
+    }
+
+    #[test]
+    fn new_diagram_families_reject_excessive_counts_and_nesting() {
+        let source = format!(
+            "erDiagram\n{}",
+            (0..129)
+                .map(|index| format!("E{index} {{\ntext field\n}}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("128 entities")
+        );
+        let source = format!(
+            "sequenceDiagram\nA->>B: Hi\n{}B-->>A: Bye\n{}",
+            "opt conditional\n".repeat(17),
+            "end\n".repeat(17)
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("nesting")
+        );
+        let source = format!(
+            "stateDiagram-v2\n{}A-->B\n{}",
+            "state Group {\n".repeat(17),
+            "}\n".repeat(17)
+        );
+        assert!(
+            render_mermaid(&source, 80)
+                .unwrap_err()
+                .to_string()
+                .contains("parser budget")
         );
     }
 }

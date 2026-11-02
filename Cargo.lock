@@ -1509,8 +1509,7 @@ dependencies = [
 [[package]]
 name = "merman-core-clin"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ff880331d67814f557b0d049cea743e087ea71e6cd9bd2159eb814a2b7c1f2"
+source = "git+https://github.com/reekta92/merman?rev=d3d4afb75232708616b7e6127b28ff9cb42b4c76#d3d4afb75232708616b7e6127b28ff9cb42b4c76"
 dependencies = [
  "chrono",
  "euclid",
@@ -2946,7 +2945,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

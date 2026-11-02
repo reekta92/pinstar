@@ -1,0 +1,24 @@
+flowchart TB
+    visitor["Guest / member / linked user / administrator"]
+    client["Client application<br/>Browser UI; tokens held in memory"]
+    visitor --> client
+    subgraph application["Application boundary"]
+        service["Web service<br/>Token checks and request validation"]
+        logic["Domain layer<br/>Shared transaction rules"]
+        export["Report generator / bounded export"]
+        service --> logic
+        service --> export
+    end
+    subgraph identity["Identity boundary"]
+        provider["Identity provider<br/>Sessions / roles / authentication"]
+    end
+    subgraph storage["Storage; separate databases and owners"]
+        records[("Database<br/>Application tables / views<br/>Restricted runtime roles")]
+        identities[("Identity database<br/>Provider accounts")]
+    end
+    client -->|"Protected request with bearer token"| service
+    client <-->|"Authorization exchange; refresh / logout"| provider
+    service -.->|"Trusted key discovery"| provider
+    logic -->|"SQL; shared write lock"| records
+    export -->|"Report read / application export"| records
+    provider --> identities
