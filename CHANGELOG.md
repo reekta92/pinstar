@@ -2,6 +2,51 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.5] - 2026-11-02
+
+### Added
+
+- Render native Mermaid state transitions and notes
+- Render native Mermaid sequence diagrams
+- Render native Mermaid entity relationships
+
+### CI
+
+- Follow the published clin codec baseline
+
+### Documentation
+
+- Describe native diagram support and limits
+
+### Fixed
+
+- Preserve host-owned rename popup hints
+- Fit flowchart groups without obscuring labels
+- Pin quoted-subgraph parser correction
+- Read source through the locked file handle
+- Reject reserved statements that cannot round-trip
+- Clip canvas edges before braille sampling
+- Coordinate writers and retain edits made after save failures
+- Retain unmodeled titles and compare drafts without allocations
+- Match raw editor hit testing to rendered bounds
+- Retain source metadata across undo and redo
+- Surface persistence errors and require explicit discard
+- Bound decode requests and resolve canvas attachments
+- Reject lossy imports and round-trip supported syntax
+- Bound offscreen edges and use native text coordinates
+- Retain source drafts and snapshot text before editing
+- Reject stale writes and preserve untouched canvas data
+- Preserve file permissions and symlink targets
+
+### Miscellaneous
+
+- Bump uuid from 1.28.0 to 1.29.0
+- Merge main and preserve image regression tests
+- Bump lru from 0.18.5 to 0.19.0
+
+### Testing
+
+- Cover schema sizes and UTF-8 safety
 ## [1.1.4] - 2026-10-23
 
 ### Added
@@ -12,6 +57,10 @@ All notable changes to pinstar are documented in this file.
 ### CI
 
 - Check codec selection against paired clin revision
+
+### Release
+
+- V1.1.4
 ## [1.1.3] - 2026-10-21
 
 ### CI
