@@ -148,6 +148,7 @@ pub fn save_to_format(
 ) -> Result<String> {
     match format {
         SupportedFormat::Canvas => {
+            data.validate()?;
             let mut output = serde_json::to_value(data)?;
             if !original_content.trim().is_empty() {
                 let mut original: serde_json::Value = serde_json::from_str(original_content)?;

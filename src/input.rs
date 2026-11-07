@@ -1129,16 +1129,7 @@ pub fn handle_pinstar_event(
             }
             _ => {
                 editor.input(Input::from(key));
-                if let Some(node_id) = &state.selection.primary {
-                    let text = editor.lines().join("\n");
-                    for node in &mut state.data.nodes {
-                        if node.id() == node_id {
-                            node.set_text(text);
-                            break;
-                        }
-                    }
-                    let _ = state.save();
-                }
+                let _ = state.sync_floating_editor();
             }
         }
         return true;
@@ -1442,6 +1433,7 @@ mod tests {
         let mut state = PinstarState::load(&path).unwrap();
         state.selection.select_only("a".into());
         state.toggle_editor();
+        assert!(state.undo_stack.is_empty());
         let mut running = true;
         let area = Rect::new(0, 0, 80, 24);
         handle_pinstar_event(
@@ -1450,6 +1442,13 @@ mod tests {
             &mut running,
             area,
         );
+        handle_pinstar_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE),
+            &mut running,
+            area,
+        );
+        assert_eq!(state.undo_stack.len(), 1);
         handle_pinstar_event(
             &mut state,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),

@@ -81,6 +81,7 @@ pub struct PinstarState {
     save_handler: Option<SaveHandler>,
     save_error: Option<String>,
     save_failed: bool,
+    floating_editor_undo_recorded: bool,
     pub path: PathBuf,
     pub format: SupportedFormat,
     pub data: CanvasData,
@@ -181,6 +182,7 @@ impl PinstarState {
             save_handler: None,
             save_error: None,
             save_failed: false,
+            floating_editor_undo_recorded: false,
             path: path.to_path_buf(),
             format,
             data,
@@ -263,6 +265,28 @@ impl PinstarState {
         result
     }
 
+    /// Apply one semantic edit and eagerly save it. Invalid edits change nothing;
+    /// publication failures retain the edited draft and its single undo entry.
+    pub fn edit_data(&mut self, edit: impl FnOnce(&mut CanvasData) -> Result<()>) -> Result<()> {
+        let result = (|| {
+            self.ensure_raw_applied()?;
+            let mut next = self.data.clone();
+            edit(&mut next)?;
+            next.validate()?;
+            if next == self.data {
+                return Ok(());
+            }
+            self.record_undo_state();
+            self.data = next;
+            self.prune_selection_after_restore();
+            self.save()
+        })();
+        if let Err(error) = &result {
+            self.save_error = Some(format!("{error:#}"));
+        }
+        result
+    }
+
     pub fn take_save_error(&mut self) -> Option<String> {
         self.save_error.take()
     }
@@ -281,6 +305,9 @@ impl PinstarState {
 
     fn save_inner(&mut self) -> Result<()> {
         self.ensure_raw_applied()?;
+        if self.format == SupportedFormat::Canvas {
+            self.data.validate()?;
+        }
         let content = if self.data == self.saved_data
             && self.has_layout_override == self.saved_layout_override
             && self.pending_source.is_none()
@@ -545,16 +572,14 @@ impl PinstarState {
 
     pub fn delete_selected_node(&mut self) {
         let ids = self.selection.all();
-        if ids.is_empty() {
-            return;
-        }
-        self.record_undo_state();
-        self.data.nodes.retain(|n| !ids.contains(n.id()));
-        self.data
-            .edges
-            .retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
-        self.selection.clear();
-        let _ = self.save();
+        let _ = self.edit_data(|data| {
+            for id in &ids {
+                if data.node(id).is_some() {
+                    data.delete_node(id, true)?;
+                }
+            }
+            Ok(())
+        });
     }
 
     // ── edges ──────────────────────────────────────────────────────────────
@@ -670,31 +695,27 @@ impl PinstarState {
     }
 
     pub fn set_edge_color(&mut self, color: Option<String>) {
-        if let Some(id) = &self.selected_edge_id {
-            let id = id.clone();
-            self.record_undo_state();
-            for edge in &mut self.data.edges {
-                if edge.id == id {
+        if let Some(id) = self.selected_edge_id.clone() {
+            let _ = self.edit_data(|data| {
+                if let Some(mut edge) = data.edge(&id).cloned() {
                     edge.color = color;
-                    break;
+                    data.update_edge(&id, edge)?;
                 }
-            }
-            let _ = self.save();
+                Ok(())
+            });
             self.sync_to_raw_editor();
         }
     }
 
     pub fn set_edge_style(&mut self, style: crate::data::EdgeStyle) {
-        if let Some(id) = &self.selected_edge_id {
-            let id = id.clone();
-            self.record_undo_state();
-            for edge in &mut self.data.edges {
-                if edge.id == id {
+        if let Some(id) = self.selected_edge_id.clone() {
+            let _ = self.edit_data(|data| {
+                if let Some(mut edge) = data.edge(&id).cloned() {
                     edge.style = style;
-                    break;
+                    data.update_edge(&id, edge)?;
                 }
-            }
-            let _ = self.save();
+                Ok(())
+            });
             self.sync_to_raw_editor();
         }
     }
@@ -780,6 +801,19 @@ impl PinstarState {
         let content = self.raw_editor.lines().join("\n");
         let result = (|| -> Result<()> {
             let mut data = formats::load_from_format(&self.path, &content, self.format)?;
+            if self.format == SupportedFormat::Canvas {
+                data.validate()?;
+            }
+            if data == self.data
+                && self.raw_editor.lines() == self.raw_editor_source.as_slice()
+                && content.lines().eq(self
+                    .pending_source
+                    .as_deref()
+                    .unwrap_or(&self.source)
+                    .lines())
+            {
+                return self.save();
+            }
             self.record_undo_state();
             // Force re-layout if orientation changed
             if data.orientation != self.data.orientation && self.format != SupportedFormat::Canvas {
@@ -1038,37 +1072,45 @@ impl PinstarState {
 
     // ── editors & menus ────────────────────────────────────────────────────
 
-    pub fn toggle_editor(&mut self) {
-        let editor_text = if let Some(editor) = &self.floating_editor {
-            Some(editor.lines().join("\n"))
-        } else {
-            None
+    pub(crate) fn sync_floating_editor(&mut self) -> Result<()> {
+        let Some(node_id) = self.selection.primary.clone() else {
+            return Ok(());
         };
-        if let Some(text) = editor_text {
-            if self.selection.primary.is_some() {
-                let node_id = self
-                    .selection
-                    .primary
-                    .as_ref()
-                    .expect("checked is_some above")
-                    .clone();
-                for node in &mut self.data.nodes {
-                    if node.id() == node_id {
-                        node.set_text(text);
-                        break;
-                    }
-                }
-                let _ = self.save();
-            }
+        let Some(editor) = &self.floating_editor else {
+            return Ok(());
+        };
+        let Some(mut node) = self.data.node(&node_id).cloned() else {
+            return Ok(());
+        };
+        let text = editor.lines().join("\n");
+        if node.text() == text {
+            return Ok(());
+        }
+        node.set_text(text);
+        if self.floating_editor_undo_recorded {
+            self.ensure_raw_applied()?;
+            self.data.update_node(&node_id, node)?;
+            self.save()
+        } else {
+            let expected = node.clone();
+            let result = self.edit_data(|data| data.update_node(&node_id, node));
+            self.floating_editor_undo_recorded = self.data.node(&node_id) == Some(&expected);
+            result
+        }
+    }
+
+    pub fn toggle_editor(&mut self) {
+        if self.floating_editor.is_some() {
+            let _ = self.sync_floating_editor();
             self.floating_editor = None;
         } else if let Some(node_id) = &self.selection.primary
-            && let Some(node) = self.data.nodes.iter().find(|n| n.id() == node_id)
+            && let Some(node) = self.data.node(node_id)
         {
             let mut textarea =
                 TextArea::from(node.text().lines().map(String::from).collect::<Vec<_>>());
             textarea.set_cursor_line_style(ratatui::style::Style::default());
             textarea.set_wrap_mode(WrapMode::WordOrGlyph);
-            self.record_undo_state();
+            self.floating_editor_undo_recorded = false;
             self.floating_editor = Some(textarea);
         }
     }
@@ -1179,24 +1221,16 @@ impl PinstarState {
     }
 
     pub fn rename_node_title(&mut self, new_title: String) {
-        let node_id = self.selection.primary.clone();
-        if let Some(node_id) = node_id {
-            self.record_undo_state();
-            let trimmed = new_title.trim().to_string();
-            let title = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            };
-
-            for node in &mut self.data.nodes {
-                if node.id() == node_id {
+        if let Some(node_id) = self.selection.primary.clone() {
+            let trimmed = new_title.trim();
+            let title = (!trimmed.is_empty()).then(|| trimmed.to_string());
+            let _ = self.edit_data(|data| {
+                if let Some(mut node) = data.node(&node_id).cloned() {
                     node.set_title(title);
-                    break;
+                    data.update_node(&node_id, node)?;
                 }
-            }
-
-            let _ = self.save();
+                Ok(())
+            });
         }
     }
 
@@ -1204,7 +1238,10 @@ impl PinstarState {
         let Some(old_id) = self.selection.primary.clone() else {
             return;
         };
-        if old_id == new_id {
+        if old_id == new_id || self.data.node(&old_id).is_none() {
+            return;
+        }
+        if self.ensure_raw_applied().is_err() {
             return;
         }
         let final_id = if new_id.is_empty() {
@@ -1219,7 +1256,7 @@ impl PinstarState {
                 Some("Node ID must be unique and valid for this diagram format".into());
             return;
         }
-        self.record_undo_state();
+        let mut pending_source = self.pending_source.clone();
         if self.format == SupportedFormat::Canvas {
             let renamed_source = (|| -> Result<String> {
                 let mut source: serde_json::Value =
@@ -1232,7 +1269,7 @@ impl PinstarState {
                 Ok(serde_json::to_string(&source)?)
             })();
             match renamed_source {
-                Ok(source) => self.pending_source = Some(source),
+                Ok(source) => pending_source = Some(source),
                 Err(error) => {
                     self.save_error = Some(error.to_string());
                     return;
@@ -1240,6 +1277,8 @@ impl PinstarState {
             }
         }
 
+        self.record_undo_state();
+        self.pending_source = pending_source;
         for node in &mut self.data.nodes {
             match node {
                 crate::data::CanvasNode::Text(n) if n.id == old_id => n.id = final_id.clone(),
@@ -1283,14 +1322,18 @@ impl PinstarState {
 
     pub fn delete_node_connections(&mut self) {
         let ids = self.selection.all();
-        if ids.is_empty() {
-            return;
-        }
-        self.record_undo_state();
-        self.data
-            .edges
-            .retain(|e| !ids.contains(&e.from_node) && !ids.contains(&e.to_node));
-        let _ = self.save();
+        let _ = self.edit_data(|data| {
+            let edges: Vec<_> = data
+                .edges
+                .iter()
+                .filter(|edge| ids.contains(&edge.from_node) || ids.contains(&edge.to_node))
+                .map(|edge| edge.id.clone())
+                .collect();
+            for id in edges {
+                data.delete_edge(&id)?;
+            }
+            Ok(())
+        });
     }
 
     pub fn set_node_color(&mut self, color: Option<String>) {
@@ -1298,18 +1341,19 @@ impl PinstarState {
         if ids.is_empty() {
             return;
         }
-        self.record_undo_state();
-        for node in &mut self.data.nodes {
-            if ids.contains(node.id()) {
-                match node {
-                    crate::data::CanvasNode::Text(n) => n.color = color.clone(),
-                    crate::data::CanvasNode::File(n) => n.color = color.clone(),
-                    crate::data::CanvasNode::Link(n) => n.color = color.clone(),
-                    crate::data::CanvasNode::Group(n) => n.color = color.clone(),
+        let _ = self.edit_data(|data| {
+            for node in &mut data.nodes {
+                if ids.contains(node.id()) {
+                    match node {
+                        crate::data::CanvasNode::Text(n) => n.color = color.clone(),
+                        crate::data::CanvasNode::File(n) => n.color = color.clone(),
+                        crate::data::CanvasNode::Link(n) => n.color = color.clone(),
+                        crate::data::CanvasNode::Group(n) => n.color = color.clone(),
+                    }
                 }
             }
-        }
-        let _ = self.save();
+            Ok(())
+        });
     }
 
     pub fn set_node_shape(&mut self, shape: crate::data::NodeShape) {
@@ -1317,21 +1361,23 @@ impl PinstarState {
         if ids.is_empty() {
             return;
         }
-        self.record_undo_state();
-        for node in &mut self.data.nodes {
-            if ids.contains(node.id())
-                && let crate::data::CanvasNode::Text(n) = node
-            {
-                n.shape = shape;
+        let _ = self.edit_data(|data| {
+            for node in &mut data.nodes {
+                if ids.contains(node.id())
+                    && let crate::data::CanvasNode::Text(n) = node
+                {
+                    n.shape = shape;
+                }
             }
-        }
-        let _ = self.save();
+            Ok(())
+        });
     }
 
     pub fn set_orientation(&mut self, orientation: crate::data::DiagramOrientation) {
-        self.record_undo_state();
-        self.data.orientation = orientation;
-        let _ = self.save();
+        let _ = self.edit_data(|data| {
+            data.orientation = orientation;
+            Ok(())
+        });
     }
 
     pub fn cycle_orientation(&mut self) {
@@ -1350,11 +1396,9 @@ impl PinstarState {
     }
 
     pub fn add_text_node(&mut self, x: f64, y: f64) {
-        self.record_undo_state();
         let id = format!("node_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        self.data
-            .nodes
-            .push(crate::data::CanvasNode::Text(crate::data::TextNode {
+        let _ = self.edit_data(|data| {
+            data.add_node(crate::data::CanvasNode::Text(crate::data::TextNode {
                 id: id.clone(),
                 x,
                 y,
@@ -1364,18 +1408,19 @@ impl PinstarState {
                 title: None,
                 color: None,
                 shape: Default::default(),
-            }));
+            }))
+        });
+        if self.data.node(&id).is_none() {
+            return;
+        }
         self.selection.select_only(id.clone());
         self.resizing_node_id = Some(id);
-        let _ = self.save();
     }
 
     pub fn add_group(&mut self, x: f64, y: f64) {
-        self.record_undo_state();
         let id = format!("group_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        self.data.nodes.insert(
-            0,
-            crate::data::CanvasNode::Group(crate::data::GroupNode {
+        let _ = self.edit_data(|data| {
+            data.add_node(crate::data::CanvasNode::Group(crate::data::GroupNode {
                 id: id.clone(),
                 x,
                 y,
@@ -1383,21 +1428,24 @@ impl PinstarState {
                 height: 300.0,
                 label: Some("New Group".to_string()),
                 color: None,
-            }),
-        );
+            }))?;
+            let group = data.nodes.pop().expect("group just added");
+            data.nodes.insert(0, group);
+            Ok(())
+        });
+        if self.data.node(&id).is_none() {
+            return;
+        }
         self.selection.select_only(id.clone());
         self.resizing_node_id = Some(id);
-        let _ = self.save();
     }
 
     /// Add an image file node at the given position. The host has already
     /// resolved the file path via its picker dialog.
     pub fn add_image_node_with(&mut self, path: PathBuf, x: f64, y: f64) {
-        self.record_undo_state();
         let id = format!("node_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        self.data
-            .nodes
-            .push(crate::data::CanvasNode::File(crate::data::FileNode {
+        let _ = self.edit_data(|data| {
+            data.add_node(crate::data::CanvasNode::File(crate::data::FileNode {
                 id: id.clone(),
                 x,
                 y,
@@ -1407,9 +1455,12 @@ impl PinstarState {
                 subpath: None,
                 title: None,
                 color: None,
-            }));
+            }))
+        });
+        if self.data.node(&id).is_none() {
+            return;
+        }
         self.selection.select_only(id.clone());
-        let _ = self.save();
     }
 
     pub fn start_connection(&mut self) {
@@ -1423,26 +1474,25 @@ impl PinstarState {
         if let Some(source_id) = self.connection_source_id.take()
             && source_id != target_id
         {
-            let edge_id = format!("edge_{source_id}_{target_id}");
-            self.record_undo_state();
-            if !self
-                .data
-                .edges
-                .iter()
-                .any(|e| e.from_node == source_id && e.to_node == target_id)
-            {
-                self.data.edges.push(crate::data::CanvasEdge {
-                    id: edge_id,
-                    from_node: source_id,
-                    from_side: Some("right".to_string()),
-                    to_node: target_id.to_string(),
-                    to_side: Some("left".to_string()),
-                    label: None,
-                    color: None,
-                    style: crate::data::EdgeStyle::Solid,
-                });
-                let _ = self.save();
-            }
+            let _ = self.edit_data(|data| {
+                if !data
+                    .edges
+                    .iter()
+                    .any(|edge| edge.from_node == source_id && edge.to_node == target_id)
+                {
+                    data.add_edge(crate::data::CanvasEdge {
+                        id: format!("edge_{source_id}_{target_id}"),
+                        from_node: source_id,
+                        from_side: Some("right".to_string()),
+                        to_node: target_id.to_string(),
+                        to_side: Some("left".to_string()),
+                        label: None,
+                        color: None,
+                        style: crate::data::EdgeStyle::Solid,
+                    })?;
+                }
+                Ok(())
+            });
         }
     }
 
@@ -1450,12 +1500,21 @@ impl PinstarState {
         if let Some(source_id) = self.deleting_connection_source_id.take()
             && source_id != target_id
         {
-            self.record_undo_state();
-            self.data.edges.retain(|e| {
-                !((e.from_node == source_id && e.to_node == target_id)
-                    || (e.from_node == target_id && e.to_node == source_id))
+            let _ = self.edit_data(|data| {
+                let edges: Vec<_> = data
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        (edge.from_node == source_id && edge.to_node == target_id)
+                            || (edge.from_node == target_id && edge.to_node == source_id)
+                    })
+                    .map(|edge| edge.id.clone())
+                    .collect();
+                for id in edges {
+                    data.delete_edge(&id)?;
+                }
+                Ok(())
             });
-            let _ = self.save();
         }
     }
 
@@ -1615,6 +1674,137 @@ impl PinstarState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_edits_record_one_undo_and_noops_or_failed_edits_record_none() {
+        let (_dir, mut state) = canvas_with(vec![text_node("a", 1.0, 1.0)], vec![]);
+        state.selection.select_only("a".into());
+        state.rename_node_title("Title".into());
+        assert_eq!(state.undo_stack.len(), 1);
+        state.rename_node_title(" Title ".into());
+        state.set_node_color(None);
+        state.set_node_shape(Default::default());
+        state.set_orientation(Default::default());
+        state.delete_node_connections();
+        state.toggle_editor();
+        state.toggle_editor();
+        state.sync_from_raw_editor().unwrap();
+        assert_eq!(state.undo_stack.len(), 1);
+        let before = state.data.clone();
+        assert!(
+            state
+                .edit_data(|data| {
+                    data.nodes.clear();
+                    anyhow::bail!("failed edit")
+                })
+                .is_err()
+        );
+        assert!(
+            state
+                .edit_data(|data| {
+                    data.nodes.push(data.nodes[0].clone());
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert_eq!(state.data, before);
+        assert_eq!(state.undo_stack.len(), 1);
+        state.undo().unwrap();
+        assert_eq!(state.data.nodes[0].title(), None);
+        state.set_node_color(None);
+        assert_eq!(state.redo_stack.len(), 1);
+        state.redo().unwrap();
+        assert_eq!(state.data.nodes[0].title(), Some("Title"));
+    }
+
+    #[test]
+    fn semantic_publication_failure_retains_draft_and_undo_for_retry() {
+        let (_dir, mut state) = canvas_with(vec![text_node("a", 1.0, 1.0)], vec![]);
+        let original = std::fs::read_to_string(&state.path).unwrap();
+        state.set_save_handler(|_, _, _| anyhow::bail!("publication failed"));
+        let result = state.edit_data(|data| {
+            let mut node = data.node("a").unwrap().clone();
+            node.set_text("draft".into());
+            data.update_node("a", node)
+        });
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("publication failed")
+        );
+        assert!(state.last_save_failed());
+        assert!(state.has_unsaved_changes());
+        assert_eq!(state.data.node("a").unwrap().text(), "draft");
+        assert_eq!(state.undo_stack.len(), 1);
+        assert_eq!(std::fs::read_to_string(&state.path).unwrap(), original);
+        state.set_save_handler(|path, _, after| crate::atomic_write(path, after));
+        state.save().unwrap();
+        assert!(!state.has_unsaved_changes());
+        state.undo().unwrap();
+        assert_eq!(state.data.node("a").unwrap().text(), "");
+    }
+
+    #[test]
+    fn semantic_save_and_undo_preserve_all_native_extension_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("extensions.canvas");
+        let original = serde_json::json!({
+            "rootExtension": {"nested": [1,2,3]},
+            "nodes": [
+                {"type":"text","id":"a","x":0,"y":0,"width":10,"height":20,"text":"a","color":"1","extension":{"a":1}},
+                {"type":"file","id":"b","x":1,"y":1,"width":10,"height":20,"file":"image.png","extension":false},
+                {"type":"link","id":"c","x":1,"y":1,"width":10,"height":20,"url":"https://example.com","extension":[2]},
+                {"type":"group","id":"d","x":1,"y":1,"width":10,"height":20,"extension":"group"}
+            ],
+            "edges": [{"id":"e","fromNode":"a","toNode":"b","fromEnd":"none","toEnd":"arrow","extension":{"edge":true}}]
+        });
+        std::fs::write(&path, serde_json::to_string(&original).unwrap()).unwrap();
+        let mut state = PinstarState::load(&path).unwrap();
+        state
+            .edit_data(|data| {
+                for node in &mut data.nodes {
+                    node.set_text("changed".into());
+                }
+                data.edges[0].label = Some("edge changed".into());
+                Ok(())
+            })
+            .unwrap();
+        for undo in [false, true] {
+            if undo {
+                state.undo().unwrap();
+            }
+            let saved: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(saved["rootExtension"], original["rootExtension"]);
+            for index in 0..4 {
+                assert_eq!(
+                    saved["nodes"][index]["extension"],
+                    original["nodes"][index]["extension"]
+                );
+            }
+            for field in ["extension", "fromEnd", "toEnd"] {
+                assert_eq!(saved["edges"][0][field], original["edges"][0][field]);
+            }
+            assert_eq!(saved["nodes"][0]["color"], "1");
+        }
+    }
+
+    #[test]
+    fn canvas_save_validates_direct_model_changes_without_writing_invalid_data() {
+        let (_dir, mut state) = canvas_with(vec![text_node("a", 1.0, 1.0)], vec![]);
+        let original = std::fs::read_to_string(&state.path).unwrap();
+        if let crate::data::CanvasNode::Text(node) = &mut state.data.nodes[0] {
+            node.height = f64::NAN;
+        }
+        assert!(state.save().is_err());
+        assert!(state.has_unsaved_changes());
+        assert_eq!(std::fs::read_to_string(&state.path).unwrap(), original);
+        assert!(
+            formats::save_to_format(&state.data, &original, SupportedFormat::Canvas, false)
+                .is_err()
+        );
+    }
 
     #[test]
     fn raw_source_preserves_formats_prose_and_unsaved_drafts() {
@@ -1873,6 +2063,10 @@ mod tests {
         assert_eq!(s.selection.primary.as_deref(), Some("b"));
         s.finish_connection("b");
         assert_eq!(s.data.edges.len(), 1);
+        assert_eq!(s.undo_stack.len(), 1);
+        s.connection_source_id = Some("a".into());
+        s.finish_connection("b");
+        assert_eq!(s.undo_stack.len(), 1);
         // delete both ways: source=b, target=a should remove a->b
         s.selection.select_only("b".into());
         s.start_delete_connection();

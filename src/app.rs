@@ -235,14 +235,13 @@ fn run_loop(
                 if let Ok(new_text) = std::fs::read_to_string(&temp_file_path)
                     && new_text != node_text
                 {
-                    state.record_undo_state();
-                    for node in &mut state.data.nodes {
-                        if node.id() == node_id {
+                    let _ = state.edit_data(|data| {
+                        if let Some(mut node) = data.node(&node_id).cloned() {
                             node.set_text(new_text);
-                            break;
+                            data.update_node(&node_id, node)?;
                         }
-                    }
-                    let _ = state.save();
+                        Ok(())
+                    });
                 }
                 let _ = std::fs::remove_file(&temp_file_path);
             }

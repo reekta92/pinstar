@@ -641,3 +641,38 @@ fn to_lib_action(action: CanvasAction) -> PinstarAction {
     }
 }
 ```
+
+### Saved Canvas edits
+
+`pinstar::data::CanvasData` owns the native Canvas schema. It exposes:
+
+```rust,ignore
+fn validate(&self) -> anyhow::Result<()>;
+fn node(&self, id: &str) -> Option<&CanvasNode>;
+fn edge(&self, id: &str) -> Option<&CanvasEdge>;
+fn add_node(&mut self, node: CanvasNode) -> anyhow::Result<()>;
+fn update_node(&mut self, id: &str, node: CanvasNode) -> anyhow::Result<()>;
+fn delete_node(&mut self, id: &str, cascade: bool) -> anyhow::Result<()>;
+fn add_edge(&mut self, edge: CanvasEdge) -> anyhow::Result<()>;
+fn update_edge(&mut self, id: &str, edge: CanvasEdge) -> anyhow::Result<()>;
+fn delete_edge(&mut self, id: &str) -> anyhow::Result<()>;
+```
+
+Mutations validate the resulting document before applying it. Updates keep IDs and
+collection order; additions append. Deleting a connected node requires `cascade`.
+Validation rejects empty or duplicate IDs within each collection, nonfinite
+geometry, nonpositive dimensions, missing endpoints, and sides other than `top`,
+`right`, `bottom`, or `left`. Native color strings are preserved. Validation never
+initializes layout.
+
+Deserialize saved Canvas JSON directly into `CanvasData` when original positions
+must stay unchanged. Serialize through `formats::save_to_format` with the original
+source to retain unmodeled root, node, and edge fields; this save path also validates
+native Canvas data.
+
+`PinstarState::edit_data` accepts an `FnOnce(&mut CanvasData) -> anyhow::Result<()>`
+and returns `anyhow::Result<()>`. It applies one validated semantic edit with one
+undo entry and eagerly saves through the existing save owner. Failed edits change
+nothing; unchanged data creates no history or save. Publication errors propagate
+while retaining the edited draft and undo entry for retry. Existing native setters
+use this helper and continue reporting failures through `take_save_error()`.
