@@ -164,13 +164,11 @@ and state diagrams as read-only terminal previews. See [supported syntax and
 limits](API.md#read-only-mermaid-previews). It requires no browser, JavaScript
 runtime, network access or temporary source files.
 
-The Git checkout pins `merman-core-clin 0.6.0` at revision
-`d3d4afb75232708616b7e6127b28ff9cb42b4c76` for quoted subgraph titles and safe
-UTF-8 ER attribute parsing. It retains the upstream 0.6 parser API, Rust 1.90,
-maintained `yaml_serde 0.10.7` and MIT/Apache-2.0 licensing. No root Cargo patch
-is needed. Publishing a registry release requires a matching parser release:
-Cargo replaces Git dependencies with their declared registry versions, and the
-published parser 0.6.0 does not include these fixes.
+The feature uses the published `merman-core-clin 0.6.1` parser for quoted
+subgraph titles and UTF-8 ER attributes. The package retains the upstream 0.6
+parser API, Rust 1.90 support, the maintained `yaml_serde 0.10.7` backend and
+MIT/Apache-2.0 licensing. Pinstar selects the parser features it uses, leaving
+the Gantt parser and its Chrono dependency out of the build.
 
 Retire the compatibility package when a maintained upstream release fits the
 host's supported compiler and parser API. See the shared development process in
