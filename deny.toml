@@ -49,4 +49,3 @@ ignore = [
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/reekta92/merman"]
