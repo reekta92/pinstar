@@ -2,6 +2,16 @@
 
 All notable changes to pinstar are documented in this file.
 
+## [1.1.6] - 2026-11-21
+
+### Fixed
+
+- Use the maintained Mermaid parser release
+
+### Miscellaneous
+
+- Bump uuid from 1.29.0 to 1.29.2
+- Bump ratatui-textarea from 0.9.3 to 0.9.4
 ## [1.1.5] - 2026-11-02
 
 ### Added
@@ -47,6 +57,10 @@ All notable changes to pinstar are documented in this file.
 ### Testing
 
 - Cover schema sizes and UTF-8 safety
+
+### Release
+
+- V1.1.5
 ## [1.1.4] - 2026-10-23
 
 ### Added
